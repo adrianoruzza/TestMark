@@ -317,17 +317,20 @@ function createMockAuthAdapter(
     initialUser?: GoogleUserProfile | null;
     onlineRef?: { value: boolean };
     allowSilent?: { value: boolean };
-    popupOmitsToken?: { value: boolean };
+    clientId?: string;
   } = {}
 ) {
   const onlineRef = opts.onlineRef ?? { value: true };
   const allowSilent = opts.allowSilent ?? { value: true };
-  const popupOmitsToken = opts.popupOmitsToken ?? { value: false };
-  let currentUser: GoogleUserProfile | null = opts.initialUser ?? null;
-  let subscriber: ((u: GoogleUserProfile | null) => void) | null = null;
+  const clientId =
+    opts.clientId !== undefined
+      ? opts.clientId
+      : 'test-public-oauth-client.apps.googleusercontent.com';
+  let storedProfileHint: GoogleUserProfile | null = opts.initialUser ?? null;
   let tokenSeq = 0;
   let silentCalls = 0;
-  let popupCalls = 0;
+  let interactiveCalls = 0;
+  let revokedTokens: string[] = [];
 
   const mintToken = () => {
     const t = `tok_${++tokenSeq}`;
@@ -337,31 +340,28 @@ function createMockAuthAdapter(
 
   const adapter: AuthRuntimeAdapter = {
     isOnline: () => onlineRef.value,
-    subscribeAuthState: (cb) => {
-      subscriber = cb;
-      cb(currentUser);
-      return () => {
-        subscriber = null;
-      };
+    getClientId: () => clientId,
+    loadProfileHint: () => (storedProfileHint ? { ...storedProfileHint } : null),
+    saveProfileHint: (user) => {
+      if (user) {
+        // Security invariant: stored profile hint must never carry tokens or secrets
+        const serialized = JSON.stringify(user);
+        assert.equal(serialized.includes('access_token'), false, 'Profile hint must never store access_token');
+        assert.equal(serialized.includes('tok_'), false, 'Profile hint must never store raw tokens');
+      }
+      storedProfileHint = user ? { ...user } : null;
     },
-    popupSignIn: async () => {
-      popupCalls++;
-      currentUser = {
-        uid: 'uid_teacher_1',
-        email: 'docente@scuola.it',
-        displayName: 'Prof. Test',
-        photoURL: null,
-      };
-      const accessToken = popupOmitsToken.value ? null : mintToken();
-      subscriber?.(currentUser);
-      return { user: currentUser, accessToken };
-    },
-    requestGisToken: async ({ prompt }) => {
+    requestGisToken: async ({ clientId: requestedId, prompt }) => {
+      if (!requestedId) {
+        throw new Error('oauth_client_not_configured');
+      }
       if (prompt === '') {
         silentCalls++;
         if (!allowSilent.value) {
           throw new Error('interaction_required');
         }
+      } else {
+        interactiveCalls++;
       }
       return {
         accessToken: mintToken(),
@@ -370,28 +370,32 @@ function createMockAuthAdapter(
       };
     },
     revokeGisToken: async (token) => {
+      revokedTokens.push(token);
       driveServer.validTokens.delete(token);
-    },
-    signOutProvider: async () => {
-      currentUser = null;
-      subscriber?.(null);
     },
     verifyDriveAccess: async (token) => {
       const ok = driveServer.validTokens.has(token);
-      return { ok, status: ok ? 200 : 401, email: ok ? 'docente@scuola.it' : undefined };
+      return {
+        ok,
+        status: ok ? 200 : 401,
+        user: ok
+          ? {
+              uid: 'uid_teacher_1',
+              email: 'docente@scuola.it',
+              displayName: 'Prof. Test',
+              photoURL: null,
+            }
+          : undefined,
+      };
     },
   };
 
   return {
     adapter,
-    getCounts: () => ({ silentCalls, popupCalls }),
+    getCounts: () => ({ silentCalls, interactiveCalls, revokedTokens: revokedTokens.length }),
+    getStoredProfileHint: () => storedProfileHint,
     onlineRef,
     allowSilent,
-    popupOmitsToken,
-    setCurrentUser: (u: GoogleUserProfile | null) => {
-      currentUser = u;
-      subscriber?.(u);
-    },
   };
 }
 
@@ -400,29 +404,31 @@ async function waitTick(ms = 25) {
 }
 
 async function runAllPhases() {
-  console.log('=== FASE A: AUTENTICAZIONE GOOGLE ===');
+  console.log('=== FASE A: AUTENTICAZIONE GOOGLE (PURE GIS, ZERO API KEY) ===');
   {
     const driveServer = new InMemoryDriveServer();
     const mock = createMockAuthAdapter(driveServer);
     const auth = new GoogleAuthManager(mock.adapter);
     auth.init();
+    await waitTick();
     assert.equal(auth.getState().status, 'signed_out', 'A1: initial signed_out');
 
-    // A1: First sign-in completes account selection + Drive verification
+    // A1: First sign-in completes GIS OAuth + Drive /about verification
     const signedIn = await auth.signIn();
     assert.equal(signedIn.status, 'authenticated', 'A1: authenticated after signIn');
     assert.equal(signedIn.hasDriveAccess, true, 'A1: Drive access verified');
     assert.equal(signedIn.user?.email, 'docente@scuola.it');
+    assert.equal(mock.getStoredProfileHint()?.email, 'docente@scuola.it', 'A1: safe profile hint saved');
 
-    // A2: Valid cached token reused with ZERO additional silent or popup calls
+    // A2: Valid cached token reused with ZERO additional silent or interactive calls
     const beforeCounts = mock.getCounts();
     const tok1 = await auth.getValidAccessToken();
     const tok2 = await auth.getValidAccessToken();
     assert(tok1 && tok1 === tok2, 'A2: cached token reused');
     assert.equal(mock.getCounts().silentCalls, beforeCounts.silentCalls, 'A2: zero unnecessary silent renewals');
-    assert.equal(mock.getCounts().popupCalls, beforeCounts.popupCalls, 'A2: zero extra popups');
+    assert.equal(mock.getCounts().interactiveCalls, beforeCounts.interactiveCalls, 'A2: zero extra popups');
 
-    // A3: App close & reopen with persisted Firebase user -> silent GIS renewal without popup
+    // A3: App close & reopen with persisted profile hint -> silent GIS renewal without popup
     const reopenMock = createMockAuthAdapter(driveServer, {
       initialUser: signedIn.user,
     });
@@ -431,7 +437,7 @@ async function runAllPhases() {
     await waitTick();
     assert.equal(reopenedAuth.getState().status, 'authenticated', 'A3: silently restored after reopen');
     assert.equal(reopenedAuth.getState().hasDriveAccess, true, 'A3: Drive access active after reopen');
-    assert.equal(reopenMock.getCounts().popupCalls, 0, 'A3: zero login popups on reopen');
+    assert.equal(reopenMock.getCounts().interactiveCalls, 0, 'A3: zero login popups on reopen');
     assert.equal(reopenMock.getCounts().silentCalls, 1, 'A3: single silent GIS refresh on reopen');
 
     // A4: Permission revocation handled cleanly -> transitions to needs_reauth
@@ -442,15 +448,17 @@ async function runAllPhases() {
     assert.equal(reopenedAuth.getState().status, 'needs_reauth', 'A4: transitions cleanly to needs_reauth');
     assert.equal(reopenedAuth.getState().hasDriveAccess, false, 'A4: hasDriveAccess=false after revoke');
 
-    // A5: Firebase popup without Drive token falls back to GIS consent inside same sign-in flow
-    const fallbackMock = createMockAuthAdapter(driveServer, {
-      popupOmitsToken: { value: true },
+    // A5: Missing VITE_GOOGLE_CLIENT_ID fails gracefully without breaking local-first mode
+    const unconfiguredMock = createMockAuthAdapter(driveServer, {
+      clientId: '',
     });
-    const fallbackAuth = new GoogleAuthManager(fallbackMock.adapter);
-    fallbackAuth.init();
-    const fallbackRes = await fallbackAuth.signIn();
-    assert.equal(fallbackRes.status, 'authenticated', 'A5: fallback GIS consent completes login');
-    assert.equal(fallbackRes.hasDriveAccess, true, 'A5: Drive access verified via GIS fallback');
+    const unconfiguredAuth = new GoogleAuthManager(unconfiguredMock.adapter);
+    unconfiguredAuth.init();
+    await waitTick();
+    const unconfRes = await unconfiguredAuth.signIn();
+    assert.equal(unconfRes.status, 'error', 'A5: unconfigured clientId reports error');
+    assert.equal(unconfRes.errorCode, 'not_configured', 'A5: explicit not_configured errorCode');
+    assert.equal(unconfRes.hasDriveAccess, false, 'A5: no Drive access when unconfigured');
 
     // A6: Offline reopen preserves offline_session and restores automatically when online
     const offlineMock = createMockAuthAdapter(driveServer, {
@@ -466,10 +474,12 @@ async function runAllPhases() {
     assert.equal(restoredOnline, true, 'A6: restored Drive token when back online');
     assert.equal(offlineAuth.getState().status, 'authenticated', 'A6: authenticated after network restored');
 
-    // A7: Sign-out clears token & state
+    // A7: Sign-out revokes token, clears in-memory token and removes profile hint
     await offlineAuth.signOut({ revokeToken: true });
     assert.equal(offlineAuth.getState().status, 'signed_out', 'A7: signed_out cleanly');
     assert.equal(await offlineAuth.getValidAccessToken(), null, 'A7: no token after signOut');
+    assert.equal(offlineMock.getStoredProfileHint(), null, 'A7: profile hint removed on signOut');
+    assert.equal(offlineMock.getCounts().revokedTokens, 1, 'A7: access token revoked on signOut');
     console.log('✓ FASE A superata (7/7 verifiche)');
   }
 

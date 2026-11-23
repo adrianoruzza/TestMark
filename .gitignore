@@ -10,6 +10,10 @@ coverage/
 .env
 .env.*
 !.env.example
+firebase-applet-config.json
+firebase-*.json
+*service-account*.json
+*client_secret*.json
 *.pem
 *.key
 *.p12

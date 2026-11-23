@@ -41,7 +41,15 @@ jobs:
       - name: Build produzione per /TestMark/
         env:
           VITE_BASE_PATH: /TestMark/
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
         run: npm run build
+
+      - name: Verifica assenza credenziali o segreti nel codice e nella build
+        run: |
+          if grep -rnE 'AIza[0-9A-Za-z_-]{35}|GOCSPX-[0-9A-Za-z_-]+|-----BEGIN [A-Z ]*PRIVATE KEY-----' src public dist; then
+            echo "ERRORE SICUREZZA: Rilevata credenziale o chiave API nei file sorgente o nella build!"
+            exit 1
+          fi
 
       - name: Verifica integrità artefatti build e PWA
         run: |
