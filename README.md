@@ -1,55 +1,78 @@
-# Registro Prove — Monitoraggio Attività Studenti
+# TestMark — Registro Prove e Monitoraggio Attività Studenti
 
-Applicazione web pensata per i docenti per registrare lo svolgimento di **compiti grafici**, **interrogazioni orali** e **consegne pratiche**, verificare automaticamente il raggiungimento dei requisiti minimi per categoria e consultare il resoconto delle carenze in tempo reale.
+Applicazione web per docenti ottimizzata per **tablet** e desktop, progettata per registrare rapidamente lo svolgimento di **compiti grafici**, **interrogazioni orali** e **consegne pratiche**, verificare i requisiti minimi per categoria e monitorare le carenze in tempo reale.
 
-L'applicazione funziona **interamente nel browser** (nessun server backend, nessun database remoto, nessuna chiave API richiesta).
+- **URL di pubblicazione (GitHub Pages):** https://adrianoruzza.github.io/TestMark/
+- **Repository GitHub:** https://github.com/adrianoruzza/TestMark
+- **Architettura:** 100% client-side (React + TypeScript + Vite + Tailwind CSS), senza backend né chiavi API.
 
 ## Funzionalità principali
 
-- Gestione per classi indipendenti con selettore rapido.
-- Tabella registro con intestazioni cronologiche fisse, colonna studenti bloccata a sinistra e riepilogo requisiti a destra.
-- Registrazione rapida in cella: **Svolto**, **Assente**, **Non svolto**, **Non registrato** (clic rapido, menu diretto con tasto destro e scorciatoie `S`, `A`, `N`, `Canc`).
-- Configurazione del numero minimo di prove richieste per ogni categoria e verifica automatica.
-- Inserimento manuale studenti e importazione da **Excel (`.xlsx`)**, **Word (`.docx`)** e **Testo (`.txt`)** con anteprima modificabile e controllo duplicati.
+- Gestione per classi indipendenti con selettore rapido e intestazioni fisse.
+- Registrazione rapida in cella (**Svolto**, **Assente**, **Non svolto**, **Non registrato**) con tocco/clic, menu rapido diretto (`▾` o tasto destro) e scorciatoie (`S`, `A`, `N`, `Canc`).
+- **UNDO / REDO** completo su tutte le modifiche ai dati (pulsanti nella barra superiore + `Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`).
+- Configurazione dei requisiti minimi per categoria e controllo automatico dello stato di ogni studente.
+- Inserimento manuale e importazione elenchi studenti da **Excel (`.xlsx`)**, **Word (`.docx`)** e **Testo (`.txt`)** con anteprima modificabile e filtro duplicati.
 - Spostamento e copia di studenti tra classi con conservazione dello storico.
-- Vista **Resoconto** con filtri per classe, stato e categoria, stampa ed esportazione Excel.
+- **Resoconto** automatico delle carenze filtrabile, stampabile ed esportabile in Excel.
 - Salvataggio automatico in `localStorage`, esportazione **Excel (`.xlsx`)** e **backup/ripristino completo (`.json`)**.
 
-## Avvio in locale
+## Installazione e avvio locale
+
+Prerequisiti: **Node.js 20+** e **npm**.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Comandi principali:
+Comandi disponibili:
 
-- `npm run dev` — Avvia il server di sviluppo sulla porta `3000`.
+- `npm run dev` — Avvia il server di sviluppo locale su `http://localhost:3000/`.
 - `npm run lint` — Esegue la verifica statica TypeScript (`tsc --noEmit`).
-- `npm run build` — Genera il bundle di produzione nella cartella `dist/`.
-- `npm run preview` — Avvia l'anteprima locale della build di produzione.
+- `npm run build` — Compila la build di produzione in `dist/` con base path `/TestMark/`.
+- `npm run preview` — Avvia un'anteprima locale della build di produzione all'indirizzo `http://localhost:4173/TestMark/`.
 
-## Pubblicazione su GitHub e GitHub Pages
+## Configurazione GitHub Pages (`/TestMark/`) e PWA
 
-Il progetto è predisposto per funzionare sia su dominio radice sia in un sottopercorso GitHub Pages (`https://<utente>.github.io/<nome-repository>/`) grazie ai percorsi relativi generati in fase di build (`vite.config.ts`) e al workflow automatico in `.github/workflows/deploy-pages.yml`.
+Il progetto è già predisposto per il deploy all'indirizzo esatto `https://adrianoruzza.github.io/TestMark/` e per l'installazione come **Progressive Web App (PWA)**:
 
-### Passaggi su GitHub
+- `vite.config.ts` imposta automaticamente `base: '/TestMark/'` in build/preview, genera `dist/manifest.webmanifest` (`start_url: '/TestMark/'`, `scope: '/TestMark/'`, `display: 'standalone'`), genera il Service Worker Workbox (`dist/sw.js`) con pulizia automatica delle cache obsolete e copia `dist/index.html` in `dist/404.html` per evitare errori 404.
+- `public/` contiene `.nojekyll`, `icon.svg`, `apple-touch-icon.png` (180×180), `pwa-192x192.png`, `pwa-512x512.png` e `pwa-maskable-512x512.png` (con safe-zone per Android).
+- `.github/workflows/deploy-pages.yml` esegue automaticamente `npm run lint`, `npm run build` (con `VITE_BASE_PATH=/TestMark/`), verifica tutti gli artefatti statici e PWA e pubblica `dist/` su GitHub Pages a ogni push su `main`.
 
-1. Crea un nuovo repository su GitHub (ad esempio `registro-prove`).
-2. Collega il repository locale ed esegui il push sul branch `main`:
+## Pubblicazione passo passo su GitHub
+
+1. Accedi a GitHub con l'account **`adrianoruzza`** e crea un nuovo repository vuoto chiamato esattamente **`TestMark`** (senza README, `.gitignore` o licenza precompilati).
+2. Dal terminale nella cartella del progetto esegui:
    ```bash
    git add .
-   git commit -m "Prima pubblicazione Registro Prove"
+   git commit -m "Predisposizione TestMark per GitHub Pages e PWA"
    git branch -M main
-   git remote add origin https://github.com/<TUO-UTENTE>/<NOME-REPO>.git
+   git remote add origin https://github.com/adrianoruzza/TestMark.git
    git push -u origin main
    ```
-3. Su GitHub apri **Settings → Pages**:
-   - In **Build and deployment → Source** seleziona **GitHub Actions**.
-4. A ogni push sul branch `main` (o tramite avvio manuale nella scheda **Actions**), GitHub eseguirà `npm run lint`, `npm run build` e pubblicherà automaticamente la cartella `dist/` su GitHub Pages.
+   *(Se il remoto `origin` è già presente, usa `git remote set-url origin https://github.com/adrianoruzza/TestMark.git` prima del push.)*
+3. Nel repository `adrianoruzza/TestMark` su GitHub apri **Settings → Pages**.
+4. In **Build and deployment → Source** seleziona **GitHub Actions**.
+5. Apri la scheda **Actions**: il workflow **Build e Deploy TestMark su GitHub Pages** partirà automaticamente (o può essere avviato manualmente con **Run workflow**).
+6. Al termine del deploy, l'applicazione sarà attiva su **https://adrianoruzza.github.io/TestMark/**.
 
-## Privacy e gestione dei dati degli studenti
+## Installazione come app (PWA)
 
-- Tutti i dati inseriti nell'app rimangono esclusivamente nel browser del docente (`localStorage`) e non vengono inviati a server esterni.
-- **Non caricare mai nel repository GitHub** file `.xlsx`, `.docx`, `.csv` o backup `.json` contenenti dati reali degli studenti: il file `.gitignore` esclude già questi formati per prevenire caricamenti accidentali.
-- Poiché `localStorage` è legato al dominio/origine del browser (es. `https://<utente>.github.io`), esegui periodicamente un **Backup completo (`.json`)** dalla sezione *Classi e Backup* per conservare una copia di sicurezza o trasferire i dati su un altro dispositivo.
+Apri **https://adrianoruzza.github.io/TestMark/** dal browser del dispositivo:
+
+- **Tablet e smartphone Android (Chrome / Edge):** tocca il pulsante discreto **Installa** nella barra superiore (oppure il menu `⋮` → *Installa app* / *Aggiungi a schermata Home*).
+- **iPad e iPhone (Safari su iPadOS / iOS):** tocca il pulsante **Installa** nella barra superiore per le istruzioni rapide, oppure tocca direttamente **Condividi** nella barra di Safari → **Aggiungi alla schermata Home** → **Aggiungi**.
+- **Desktop (Chrome / Edge):** clicca **Installa** nella barra superiore dell'app (oppure l'icona di installazione nella barra degli indirizzi).
+
+### Funzionamento offline e aggiornamenti
+- Dopo la prima apertura online, TestMark funziona anche **offline** (registrazione prove, UNDO/REDO, resoconto, import/export Excel e backup JSON) grazie al precaching Workbox degli asset statici.
+- Quando viene pubblicata una nuova versione su GitHub Pages, l'app mostra un avviso discreto in basso a sinistra (**"Nuova versione disponibile — Aggiorna"**): l'aggiornamento ricarica solo il codice applicativo lasciando **intatti tutti i dati salvati in `localStorage`**.
+
+## Privacy e sicurezza dei dati
+
+- Nessuna credenziale o chiave API è presente nel codice sorgente.
+- Tutti i dati degli studenti vengono salvati esclusivamente in `localStorage` nel browser del dispositivo (mai nella cache del Service Worker e mai inviati a server esterni).
+- Il file `.gitignore` esclude automaticamente file `.env*`, chiavi/credenziali e file di elenchi/backup degli studenti (`*.xlsx`, `*.xls`, `*.docx`, `*.csv`, `registro-prove-backup-*.json`, `studenti*.txt`, `backups/`, `exports/`).
+- Esegui periodicamente un **Backup completo (`.json`)** dalla sezione *Classi e Backup* per conservare una copia personale dei tuoi archivi o trasferirli tra dispositivi/browser diversi.

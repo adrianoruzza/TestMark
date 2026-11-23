@@ -1,11 +1,17 @@
 {
-  "name": "registro-prove",
+  "name": "testmark",
   "private": true,
   "version": "1.0.0",
+  "homepage": "https://adrianoruzza.github.io/TestMark/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adrianoruzza/TestMark.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
+    "build:gh-pages": "VITE_BASE_PATH=/TestMark/ vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
@@ -25,6 +31,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -33,6 +40,6 @@
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
-    "@types/express": "^4.17.21"
+    "vite-plugin-pwa": "^2.0.0"
   }
 }

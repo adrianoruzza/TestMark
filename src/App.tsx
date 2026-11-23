@@ -16,6 +16,7 @@ import { ArchiveSettingsView } from './components/ArchiveSettingsView';
 import { ClassSettingsModal } from './components/ClassSettingsModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { MoveCopyStudentModal } from './components/MoveCopyStudentModal';
+import { PWAInstallButton, PWAStatusOverlay } from './components/PWAControls';
 import { RegisterTable } from './components/RegisterTable';
 import { ResocontoView } from './components/ResocontoView';
 import { StudentHistoryModal } from './components/StudentHistoryModal';
@@ -696,8 +697,9 @@ export default function App() {
             </button>
           </nav>
 
-          {/* Zone 3: Dedicated UNDO / REDO + 1 Contextual Primary Action */}
+          {/* Zone 3: Discrete PWA Install (hidden when installed) + UNDO / REDO + 1 Contextual Primary Action */}
           <div className="flex items-center gap-1.5 shrink-0 sm:gap-2">
+            <PWAInstallButton />
             <div
               className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50/70 p-0.5"
               role="group"
@@ -1054,6 +1056,8 @@ export default function App() {
         onConfirm={() => confirmState?.onConfirm()}
         onCancel={() => setConfirmState(null)}
       />
+
+      <PWAStatusOverlay />
 
       {/* Compact feedback toast */}
       {toastMessage && (

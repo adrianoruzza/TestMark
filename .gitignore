@@ -24,6 +24,11 @@ registro-prove-*.xlsx
 *.xls
 *.docx
 *.csv
+*.db
+*.sqlite
+studenti*.txt
+elenco*.txt
+classi*.txt
 backups/
 exports/
 dati-studenti/
