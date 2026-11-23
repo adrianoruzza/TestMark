@@ -2,6 +2,7 @@
 node_modules/
 build/
 dist/
+dev-dist/
 coverage/
 .vite/
 
@@ -48,3 +49,6 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# AI Studio temporary attachments
+public/assets/aistudio/
