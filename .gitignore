@@ -12,11 +12,18 @@ coverage/
 !.env.example
 firebase-applet-config.json
 firebase-*.json
+google-services.json
+GoogleService-Info.plist
 *service-account*.json
 *client_secret*.json
+oauth*.json
 *.pem
 *.key
 *.p12
+*.p8
+*.pfx
+*.jks
+*.keystore
 credentials*.json
 *secret*
 
@@ -54,5 +61,6 @@ Thumbs.db
 .vscode/
 .idea/
 
-# AI Studio temporary attachments
+# AI Studio temporary attachments & internal workspace artifacts
+.aistudio/
 public/assets/aistudio/

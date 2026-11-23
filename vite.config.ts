@@ -71,11 +71,11 @@ export default defineConfig(({command, isPreview}) => {
           globPatterns: ['**/*.{js,css,html,woff,woff2}'],
           globIgnores: ['404.html'],
           navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/__\/auth/, /^\/__\/firebase/],
+          navigateFallbackDenylist: [/^\/__\/auth/],
           runtimeCaching: [
             {
               urlPattern:
-                /^https:\/\/(accounts\.google\.com|www\.googleapis\.com|oauth2\.googleapis\.com|apis\.google\.com|identitytoolkit\.googleapis\.com|securetoken\.googleapis\.com)\/.*/i,
+                /^https:\/\/(accounts\.google\.com|www\.googleapis\.com|oauth2\.googleapis\.com|apis\.google\.com)\/.*/i,
               handler: 'NetworkOnly',
             },
             {
@@ -136,6 +136,9 @@ export default defineConfig(({command, isPreview}) => {
         },
       },
     ],
+    build: {
+      sourcemap: false,
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

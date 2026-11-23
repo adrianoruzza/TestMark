@@ -44,10 +44,20 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
         run: npm run build
 
-      - name: Verifica assenza credenziali o segreti nel codice e nella build
+      - name: Verifica assenza credenziali, segreti o source map nel codice e nella build
         run: |
-          if grep -rnE 'AIza[0-9A-Za-z_-]{35}|GOCSPX-[0-9A-Za-z_-]+|-----BEGIN [A-Z ]*PRIVATE KEY-----' src public dist; then
-            echo "ERRORE SICUREZZA: Rilevata credenziale o chiave API nei file sorgente o nella build!"
+          if [ -f firebase-applet-config.json ]; then
+            echo "ERRORE SICUREZZA: file firebase-applet-config.json presente nel repository!"
+            exit 1
+          fi
+          if find dist -name '*.map' | grep -q .; then
+            echo "ERRORE SICUREZZA: rilevate source map (.map) nella build di produzione!"
+            exit 1
+          fi
+          MATCHED=$(grep -rlE 'AIza[0-9A-Za-z_-]{35}|GOCSPX-[0-9A-Za-z_-]+|ya29\.[0-9A-Za-z_-]+|1//[0-9A-Za-z_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(ghp_|github_pat_)[0-9A-Za-z_]+|AKIA[0-9A-Z]{16}' src public dist .env.example index.html README.md 2>/dev/null || true)
+          if [ -n "$MATCHED" ]; then
+            echo "ERRORE SICUREZZA: Rilevata credenziale o segreto nei seguenti file:"
+            echo "$MATCHED"
             exit 1
           fi
 
