@@ -50,12 +50,15 @@ jobs:
           test -f dist/.nojekyll || (echo "ERRORE: dist/.nojekyll mancante" && exit 1)
           test -f dist/manifest.webmanifest || (echo "ERRORE: dist/manifest.webmanifest mancante" && exit 1)
           test -f dist/sw.js || (echo "ERRORE: dist/sw.js mancante" && exit 1)
-          test -f dist/pwa-192x192.png || (echo "ERRORE: dist/pwa-192x192.png mancante" && exit 1)
-          test -f dist/pwa-512x512.png || (echo "ERRORE: dist/pwa-512x512.png mancante" && exit 1)
-          test -f dist/pwa-maskable-512x512.png || (echo "ERRORE: dist/pwa-maskable-512x512.png mancante" && exit 1)
-          test -f dist/apple-touch-icon.png || (echo "ERRORE: dist/apple-touch-icon.png mancante" && exit 1)
+          test -f dist/favicon.ico || (echo "ERRORE: dist/favicon.ico mancante" && exit 1)
+          test -f dist/testmark-favicon-32-v2.png || (echo "ERRORE: dist/testmark-favicon-32-v2.png mancante" && exit 1)
+          test -f dist/testmark-icon-192-v2.png || (echo "ERRORE: dist/testmark-icon-192-v2.png mancante" && exit 1)
+          test -f dist/testmark-icon-512-v2.png || (echo "ERRORE: dist/testmark-icon-512-v2.png mancante" && exit 1)
+          test -f dist/testmark-icon-maskable-512-v2.png || (echo "ERRORE: dist/testmark-icon-maskable-512-v2.png mancante" && exit 1)
+          test -f dist/testmark-apple-touch-icon-v2.png || (echo "ERRORE: dist/testmark-apple-touch-icon-v2.png mancante" && exit 1)
           grep -q '/TestMark/assets/' dist/index.html || (echo "ERRORE: base path /TestMark/ non presente in dist/index.html" && exit 1)
           grep -q '/TestMark/manifest.webmanifest' dist/index.html || (echo "ERRORE: manifest.webmanifest non collegato in dist/index.html" && exit 1)
+          grep -q '/TestMark/testmark-icon-192-v2.png' dist/index.html || (echo "ERRORE: nuova icona non collegata in dist/index.html" && exit 1)
 
       - name: Configura GitHub Pages
         uses: actions/configure-pages@v5

@@ -38,7 +38,7 @@ Comandi disponibili:
 Il progetto è già predisposto per il deploy all'indirizzo esatto `https://adrianoruzza.github.io/TestMark/` e per l'installazione come **Progressive Web App (PWA)**:
 
 - `vite.config.ts` imposta automaticamente `base: '/TestMark/'` in build/preview, genera `dist/manifest.webmanifest` (`start_url: '/TestMark/'`, `scope: '/TestMark/'`, `display: 'standalone'`), genera il Service Worker Workbox (`dist/sw.js`) con pulizia automatica delle cache obsolete e copia `dist/index.html` in `dist/404.html` per evitare errori 404.
-- `public/` contiene `.nojekyll`, `icon.svg`, `apple-touch-icon.png` (180×180), `pwa-192x192.png`, `pwa-512x512.png` e `pwa-maskable-512x512.png` (con safe-zone per Android).
+- `public/` contiene `.nojekyll`, `favicon.ico`, `testmark-favicon-32-v2.png` (32×32), `testmark-apple-touch-icon-v2.png` (180×180), `testmark-icon-192-v2.png`, `testmark-icon-512-v2.png` e `testmark-icon-maskable-512-v2.png` (con safe-zone per Android).
 - `.github/workflows/deploy-pages.yml` esegue automaticamente `npm run lint`, `npm run build` (con `VITE_BASE_PATH=/TestMark/`), verifica tutti gli artefatti statici e PWA e pubblica `dist/` su GitHub Pages a ogni push su `main`.
 
 ## Pubblicazione passo passo su GitHub
