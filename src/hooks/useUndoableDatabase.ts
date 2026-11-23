@@ -31,7 +31,15 @@ function reconcileActiveClassId(
   return classes[0].id;
 }
 
-export function useUndoableDatabase() {
+export interface UseUndoableDatabaseOptions {
+  onDataMutation?: (
+    prevDb: AppDatabase,
+    nextDb: AppDatabase,
+    label: string
+  ) => void;
+}
+
+export function useUndoableDatabase(options?: UseUndoableDatabaseOptions) {
   const [state, setState] = useState<UndoableState>(() => ({
     db: loadDatabase(),
     past: [],
@@ -41,7 +49,10 @@ export function useUndoableDatabase() {
   const stateRef = useRef<UndoableState>(state);
   stateRef.current = state;
 
-  // Persist every committed state (including undo/redo restorations) automatically
+  const onDataMutationRef = useRef(options?.onDataMutation);
+  onDataMutationRef.current = options?.onDataMutation;
+
+  // Persist every committed state (including undo/redo/sync restorations) automatically
   useEffect(() => {
     saveDatabase(state.db);
   }, [state.db]);
@@ -52,37 +63,62 @@ export function useUndoableDatabase() {
    */
   const commitChange = useCallback(
     (label: string, updater: (prev: AppDatabase) => AppDatabase) => {
-      setState((prevState) => {
-        const nextDbRaw = updater(prevState.db);
-        if (nextDbRaw === prevState.db) return prevState;
+      const prevDb = stateRef.current.db;
+      const nextDbRaw = updater(prevDb);
+      if (nextDbRaw === prevDb) return;
 
-        const nextDb: AppDatabase = {
-          ...nextDbRaw,
-          updatedAt: new Date().toISOString(),
-        };
+      const nextDb: AppDatabase = {
+        ...nextDbRaw,
+        updatedAt: new Date().toISOString(),
+      };
 
-        const snapshot: HistorySnapshot = {
-          classes: prevState.db.classes,
-          activeClassId: prevState.db.activeClassId,
-          label,
-        };
+      const snapshot: HistorySnapshot = {
+        classes: prevDb.classes,
+        activeClassId: prevDb.activeClassId,
+        label,
+      };
 
-        const nextPast =
-          prevState.past.length >= MAX_HISTORY_STEPS
-            ? [...prevState.past.slice(prevState.past.length - MAX_HISTORY_STEPS + 1), snapshot]
-            : [...prevState.past, snapshot];
+      const currentPast = stateRef.current.past;
+      const nextPast =
+        currentPast.length >= MAX_HISTORY_STEPS
+          ? [...currentPast.slice(currentPast.length - MAX_HISTORY_STEPS + 1), snapshot]
+          : [...currentPast, snapshot];
 
-        const nextState: UndoableState = {
-          db: nextDb,
-          past: nextPast,
-          future: [],
-        };
-        stateRef.current = nextState;
-        return nextState;
-      });
+      const nextState: UndoableState = {
+        db: nextDb,
+        past: nextPast,
+        future: [],
+      };
+      stateRef.current = nextState;
+      setState(nextState);
+      onDataMutationRef.current?.(prevDb, nextDb, label);
     },
     []
   );
+
+  /**
+   * Apply a database received from Google Drive sync or conflict resolution without
+   * triggering a redundant local-change loop.
+   */
+  const applyExternalDatabase = useCallback((nextDb: AppDatabase) => {
+    setState((prevState) => {
+      const nextActiveId = reconcileActiveClassId(
+        prevState.db.activeClassId,
+        nextDb.activeClassId,
+        nextDb.classes
+      );
+      const normalized: AppDatabase = {
+        ...nextDb,
+        activeClassId: nextActiveId,
+      };
+      const nextState: UndoableState = {
+        ...prevState,
+        db: normalized,
+      };
+      stateRef.current = nextState;
+      return nextState;
+    });
+  }, []);
 
   /**
    * Update non-historical navigation state (e.g., switching the active class)
@@ -122,19 +158,22 @@ export function useUndoableDatabase() {
       previous.classes
     );
 
+    const nextDb: AppDatabase = {
+      ...current.db,
+      classes: previous.classes,
+      activeClassId: nextActiveId,
+      updatedAt: new Date().toISOString(),
+    };
+
     const nextState: UndoableState = {
-      db: {
-        ...current.db,
-        classes: previous.classes,
-        activeClassId: nextActiveId,
-        updatedAt: new Date().toISOString(),
-      },
+      db: nextDb,
       past: nextPast,
       future: [...current.future, redoSnapshot],
     };
 
     stateRef.current = nextState;
     setState(nextState);
+    onDataMutationRef.current?.(current.db, nextDb, `Annulla: ${previous.label}`);
     return previous.label;
   }, []);
 
@@ -157,19 +196,22 @@ export function useUndoableDatabase() {
       next.classes
     );
 
+    const nextDb: AppDatabase = {
+      ...current.db,
+      classes: next.classes,
+      activeClassId: nextActiveId,
+      updatedAt: new Date().toISOString(),
+    };
+
     const nextState: UndoableState = {
-      db: {
-        ...current.db,
-        classes: next.classes,
-        activeClassId: nextActiveId,
-        updatedAt: new Date().toISOString(),
-      },
+      db: nextDb,
       past: [...current.past, undoSnapshot],
       future: nextFuture,
     };
 
     stateRef.current = nextState;
     setState(nextState);
+    onDataMutationRef.current?.(current.db, nextDb, `Ripristina: ${next.label}`);
     return next.label;
   }, []);
 
@@ -182,6 +224,7 @@ export function useUndoableDatabase() {
     undoCount: state.past.length,
     redoCount: state.future.length,
     commitChange,
+    applyExternalDatabase,
     setActiveClassId,
     undo,
     redo,

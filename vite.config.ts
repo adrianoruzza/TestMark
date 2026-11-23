@@ -71,7 +71,13 @@ export default defineConfig(({command, isPreview}) => {
           globPatterns: ['**/*.{js,css,html,woff,woff2}'],
           globIgnores: ['404.html'],
           navigateFallback: 'index.html',
+          navigateFallbackDenylist: [/^\/__\/auth/, /^\/__\/firebase/],
           runtimeCaching: [
+            {
+              urlPattern:
+                /^https:\/\/(accounts\.google\.com|www\.googleapis\.com|oauth2\.googleapis\.com|apis\.google\.com|identitytoolkit\.googleapis\.com|securetoken\.googleapis\.com)\/.*/i,
+              handler: 'NetworkOnly',
+            },
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'CacheFirst',

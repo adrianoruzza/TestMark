@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRightLeft,
   CheckCircle2,
@@ -15,12 +15,14 @@ import { ActivityModal } from './components/ActivityModal';
 import { ArchiveSettingsView } from './components/ArchiveSettingsView';
 import { ClassSettingsModal } from './components/ClassSettingsModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { HeaderSyncIndicator } from './components/GoogleSyncControls';
 import { MoveCopyStudentModal } from './components/MoveCopyStudentModal';
 import { PWAInstallButton, PWAStatusOverlay } from './components/PWAControls';
 import { RegisterTable } from './components/RegisterTable';
 import { ResocontoView } from './components/ResocontoView';
 import { StudentHistoryModal } from './components/StudentHistoryModal';
 import { StudentModal } from './components/StudentModal';
+import { useGoogleDriveSync } from './hooks/useGoogleDriveSync';
 import { useUndoableDatabase } from './hooks/useUndoableDatabase';
 import {
   Activity,
@@ -51,6 +53,10 @@ interface ConfirmState {
 }
 
 export default function App() {
+  const syncNotifyRef = useRef<
+    ((prevDb: AppDatabase, nextDb: AppDatabase, label: string) => void) | null
+  >(null);
+
   const {
     db,
     canUndo,
@@ -58,10 +64,18 @@ export default function App() {
     nextUndoLabel,
     nextRedoLabel,
     commitChange,
+    applyExternalDatabase,
     setActiveClassId,
     undo,
     redo,
-  } = useUndoableDatabase();
+  } = useUndoableDatabase({
+    onDataMutation: (prevDb, nextDb, label) => {
+      syncNotifyRef.current?.(prevDb, nextDb, label);
+    },
+  });
+
+  const dbRef = useRef(db);
+  dbRef.current = db;
 
   const [view, setView] = useState<AppView>('registro');
 
@@ -92,6 +106,17 @@ export default function App() {
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
   }, []);
+
+  const driveSync = useGoogleDriveSync({
+    getLocalDatabase: () => dbRef.current,
+    applyRemoteDatabase: (nextDb, reason) => {
+      applyExternalDatabase(nextDb);
+      showToast(reason);
+    },
+    onStatusToast: showToast,
+  });
+
+  syncNotifyRef.current = driveSync.notifyLocalChange;
 
   useEffect(() => {
     if (!toastMessage) return;
@@ -697,8 +722,12 @@ export default function App() {
             </button>
           </nav>
 
-          {/* Zone 3: Discrete PWA Install (hidden when installed) + UNDO / REDO + 1 Contextual Primary Action */}
+          {/* Zone 3: Sync Indicator + Discrete PWA Install + UNDO / REDO + 1 Contextual Primary Action */}
           <div className="flex items-center gap-1.5 shrink-0 sm:gap-2">
+            <HeaderSyncIndicator
+              sync={driveSync}
+              onOpenBackupSection={() => setView('archivio')}
+            />
             <PWAInstallButton />
             <div
               className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50/70 p-0.5"
@@ -980,6 +1009,7 @@ export default function App() {
       {view === 'archivio' && (
         <ArchiveSettingsView
           db={db}
+          driveSync={driveSync}
           onEditClass={openEditClassModal}
           onRequestDeleteClass={handleRequestDeleteClass}
           onOpenClass={handleOpenClassFromView}
