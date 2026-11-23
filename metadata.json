@@ -1,0 +1,6 @@
+{
+  "name": "Registro Prove",
+  "description": "Applicazione docente per il monitoraggio delle prove, interrogazioni e consegne degli studenti e la verifica dei requisiti minimi per categoria.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

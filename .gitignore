@@ -1,0 +1,45 @@
+# Dependencies & build outputs
+node_modules/
+build/
+dist/
+coverage/
+.vite/
+
+# Environment variables, credentials & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials*.json
+*secret*
+
+# Student personal data, class lists & local exports/backups
+# (Avoid accidentally committing real student lists or backup archives)
+registro-prove-backup-*.json
+registro-classe-*.xlsx
+registro-prove-*.xlsx
+*.xlsx
+*.xls
+*.docx
+*.csv
+backups/
+exports/
+dati-studenti/
+
+# Logs & temporary files
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS & editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
