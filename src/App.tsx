@@ -973,6 +973,7 @@ export default function App() {
                 searchQuery={searchQuery}
                 categoryFilter={categoryFilter}
                 requirementFilter={requirementFilter}
+                disableZoomShortcuts={anyModalOpen}
                 onUpdateStatus={handleUpdateStatus}
                 onBulkSetActivityStatus={handleBulkSetActivityStatus}
                 onEditActivity={(act) => {

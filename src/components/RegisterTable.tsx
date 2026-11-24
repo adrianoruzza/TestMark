@@ -12,10 +12,12 @@ import {
   MoreVertical,
   Pencil,
   Plus,
+  RotateCcw,
   Trash2,
   UserPlus,
   XCircle,
 } from 'lucide-react';
+import { useWorkspaceZoom } from '../hooks/useWorkspaceZoom';
 import {
   Activity,
   ActivityCategory,
@@ -40,6 +42,7 @@ interface RegisterTableProps {
   searchQuery: string;
   categoryFilter: ActivityCategory | 'ALL';
   requirementFilter: 'ALL' | 'OK' | 'CARENZA';
+  disableZoomShortcuts?: boolean;
   onUpdateStatus: (
     studentId: string,
     activityId: string,
@@ -75,6 +78,7 @@ export const RegisterTable: React.FC<RegisterTableProps> = ({
   searchQuery,
   categoryFilter,
   requirementFilter,
+  disableZoomShortcuts = false,
   onUpdateStatus,
   onBulkSetActivityStatus,
   onEditActivity,
@@ -90,6 +94,24 @@ export const RegisterTable: React.FC<RegisterTableProps> = ({
   } | null>(null);
   const [openHeaderMenu, setOpenHeaderMenu] = useState<string | null>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+
+  const {
+    zoomPercent,
+    isDefaultZoom,
+    canZoomIn,
+    canZoomOut,
+    zoomIn,
+    zoomOut,
+    resetZoom,
+  } = useWorkspaceZoom(tableContainerRef, tableRef, {
+    enabled: schoolClass.students.length > 0,
+    disableShortcuts: disableZoomShortcuts,
+    onGestureStart: () => {
+      setOpenCellMenu(null);
+      setOpenHeaderMenu(null);
+    },
+  });
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -205,7 +227,10 @@ export const RegisterTable: React.FC<RegisterTableProps> = ({
         ref={tableContainerRef}
         className="register-scroll relative flex-1 overflow-auto"
       >
-        <table className="w-max min-w-full border-separate border-spacing-0 text-left text-sm">
+        <table
+          ref={tableRef}
+          className="register-zoom-table w-max border-separate border-spacing-0 text-left text-sm"
+        >
           <thead>
             <tr>
               {/* Sticky Top-Left: Student column */}
@@ -374,29 +399,27 @@ export const RegisterTable: React.FC<RegisterTableProps> = ({
                 })
               )}
 
-              {/* Sticky Top-Right: Riepilogo column */}
+              {/* Sticky Top-Right: Riepilogo column (compact & space-optimized) */}
               <th
                 scope="col"
-                className="sticky right-0 top-0 z-30 w-[184px] min-w-[178px] border-b border-l border-slate-200 bg-slate-50 px-2.5 py-2 align-bottom shadow-[-1px_0_0_0_#e2e8f0] sm:w-[228px] sm:min-w-[220px] sm:px-3"
+                className="sticky right-0 top-0 z-30 w-[134px] min-w-[132px] max-w-[142px] border-b border-l border-slate-200 bg-slate-50 px-1.5 py-1.5 align-bottom shadow-[-1px_0_0_0_#e2e8f0] sm:w-[158px] sm:min-w-[154px] sm:max-w-[164px] sm:px-2"
               >
                 <div className="flex flex-col gap-0.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-900">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[11px] font-semibold text-slate-900 sm:text-xs">
                       Riepilogo
                     </span>
                     <span className="text-[10px] font-medium text-slate-500">
                       Esito
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 font-mono text-[10px] font-normal text-slate-500 tabular-nums">
+                  <div className="flex items-center gap-1.5 font-mono text-[10px] font-normal text-slate-500 tabular-nums">
                     <span title="Minimo Compiti grafici">
                       G:{schoolClass.minimums.COMPITO_GRAFICO}
                     </span>
-                    <span aria-hidden="true">·</span>
                     <span title="Minimo Interrogazioni orali">
                       O:{schoolClass.minimums.INTERROGAZIONE_ORALE}
                     </span>
-                    <span aria-hidden="true">·</span>
                     <span title="Minimo Consegne pratiche">
                       P:{schoolClass.minimums.CONSEGNA_PRATICO}
                     </span>
@@ -595,17 +618,17 @@ export const RegisterTable: React.FC<RegisterTableProps> = ({
                       })
                     )}
 
-                    {/* Sticky Right: Riepilogo column */}
+                    {/* Sticky Right: Riepilogo column (compact & space-optimized) */}
                     <td
-                      className={`sticky right-0 z-10 border-b border-l border-slate-200 px-2 py-1 shadow-[-1px_0_0_0_#e2e8f0] transition-colors sm:px-2.5 ${
+                      className={`sticky right-0 z-10 border-b border-l border-slate-200 px-1.5 py-1 shadow-[-1px_0_0_0_#e2e8f0] transition-colors sm:px-2 ${
                         rowAllMet
                           ? 'bg-emerald-50/75 group-hover:bg-emerald-100/60'
                           : 'bg-white group-hover:bg-slate-50'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-1.5">
+                      <div className="flex items-center justify-between gap-1">
                         {/* Per-category ratios */}
-                        <div className="flex items-center gap-1 font-mono text-[11px] tabular-nums">
+                        <div className="flex items-center gap-0.5 font-mono text-[10px] leading-tight tabular-nums">
                           {CATEGORY_ORDER.map((cat) => {
                             const catEval = evaluation.byCategory[cat];
                             const meta = CATEGORY_META[cat];
@@ -618,7 +641,7 @@ export const RegisterTable: React.FC<RegisterTableProps> = ({
                                     ? ` (incl. ${catEval.completedArchived} storico)`
                                     : ''
                                 } · Assenze: ${catEval.absentCount} · Non svolti: ${catEval.notDoneCount}`}
-                                className={`rounded px-1 py-0.5 text-[10px] font-semibold sm:px-1.5 sm:text-[11px] ${
+                                className={`rounded px-1 py-0.5 font-semibold tracking-tight whitespace-nowrap ${
                                   catEval.met
                                     ? 'bg-emerald-100/80 text-emerald-900'
                                     : 'bg-amber-100/90 text-amber-900'
@@ -633,19 +656,19 @@ export const RegisterTable: React.FC<RegisterTableProps> = ({
                         {/* Overall status indicator (color + text + icon) */}
                         {rowAllMet ? (
                           <div
-                            className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-emerald-800"
+                            className="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-emerald-800"
                             title="Tutti i requisiti minimi raggiunti"
                           >
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                             <span className="hidden sm:inline">OK</span>
                           </div>
                         ) : (
                           <div
-                            className="inline-flex shrink-0 items-center gap-0.5 text-xs font-semibold text-amber-800"
+                            className="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-amber-800"
                             title={`Carenza: ${evaluation.deficitSummary}`}
                           >
-                            <AlertCircle className="h-4 w-4 text-amber-600" />
-                            <span className="font-mono text-[11px] tabular-nums">
+                            <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                            <span className="font-mono text-[10.5px] tabular-nums">
                               -{evaluation.totalMissing}
                             </span>
                           </div>
@@ -660,28 +683,84 @@ export const RegisterTable: React.FC<RegisterTableProps> = ({
         </table>
       </div>
 
-      {/* Compact bottom legend strip inside table frame */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/90 px-3 py-1 text-[11px] text-slate-600">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="inline-flex items-center gap-1.5">
+      {/* Compact bottom legend + workspace zoom bar inside table frame */}
+      <div className="no-print flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/90 px-2.5 py-1 text-[11px] text-slate-600 sm:px-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
             <span className="h-2.5 w-2.5 rounded-sm border border-emerald-400 bg-emerald-200" />
             Svolto
           </span>
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
             <span className="h-2.5 w-2.5 rounded-sm border border-amber-400 bg-amber-200" />
             Assente
           </span>
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
             <span className="h-2.5 w-2.5 rounded-sm border border-rose-400 bg-rose-200" />
             Non svolto
           </span>
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
             <span className="h-2.5 w-2.5 rounded-sm border border-slate-300 bg-white" />
             Non registrato
           </span>
         </div>
-        <div className="hidden text-slate-500 md:block">
-          Clic/tocco: cicla stato · ▾ o tasto destro: scelta diretta · S/A/N/Canc
+
+        <div className="flex items-center gap-2.5 ml-auto">
+          <span className="hidden text-slate-500 xl:inline">
+            Clic/tocco: cicla · ▾ scelta diretta · Pinch / Ctrl+rotella: zoom
+          </span>
+
+          {/* Compact Zoom Controls with dedicated exact 100% reset */}
+          <div
+            className="inline-flex items-center rounded-md border border-slate-200 bg-white p-0.5 shadow-2xs"
+            role="group"
+            aria-label="Controllo zoom area di lavoro"
+          >
+            <button
+              type="button"
+              onClick={zoomOut}
+              disabled={!canZoomOut}
+              title="Riduci zoom (Ctrl+-)"
+              aria-label="Riduci zoom"
+              className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-700 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent sm:h-6 sm:w-6"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={resetZoom}
+              disabled={isDefaultZoom}
+              title={
+                isDefaultZoom
+                  ? 'Zoom al 100% (dimensione predefinita)'
+                  : 'Ripristina zoom esattamente al 100% (Ctrl+0)'
+              }
+              aria-label={
+                isDefaultZoom
+                  ? `Zoom corrente ${zoomPercent}%`
+                  : `Zoom corrente ${zoomPercent}%, clicca per ripristinare al 100%`
+              }
+              className={`inline-flex h-7 min-w-[54px] items-center justify-center gap-1 rounded px-1.5 font-mono text-[11px] font-semibold tabular-nums transition-colors whitespace-nowrap sm:h-6 ${
+                isDefaultZoom
+                  ? 'cursor-default text-slate-600'
+                  : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+              }`}
+            >
+              {!isDefaultZoom && <RotateCcw className="h-3 w-3 shrink-0" />}
+              <span>{zoomPercent}%</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={zoomIn}
+              disabled={!canZoomIn}
+              title="Aumenta zoom (Ctrl++)"
+              aria-label="Aumenta zoom"
+              className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-700 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent sm:h-6 sm:w-6"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

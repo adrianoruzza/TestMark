@@ -26,7 +26,16 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Subtle, high-legibility scrollbars for wide register grids */
+/* Subtle, high-legibility scrollbars & gesture-friendly scrolling for wide register grids */
+.register-scroll {
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.register-zoom-table {
+  min-width: max(100%, calc(100% / var(--register-zoom, 1)));
+}
+
 .register-scroll::-webkit-scrollbar {
   width: 10px;
   height: 10px;
