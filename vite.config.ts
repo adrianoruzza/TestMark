@@ -65,19 +65,13 @@ export default defineConfig(({command, isPreview}) => {
           ],
         },
         workbox: {
-          cacheId: 'testmark-v3',
+          cacheId: 'testmark-v4',
           cleanupOutdatedCaches: true,
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,woff,woff2}'],
           globIgnores: ['404.html', 'assets/aistudio/**'],
           navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/__\/auth/],
           runtimeCaching: [
-            {
-              urlPattern:
-                /^https:\/\/(accounts\.google\.com|www\.googleapis\.com|oauth2\.googleapis\.com|apis\.google\.com)\/.*/i,
-              handler: 'NetworkOnly',
-            },
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'CacheFirst',

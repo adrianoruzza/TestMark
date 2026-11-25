@@ -31,15 +31,7 @@ function reconcileActiveClassId(
   return classes[0].id;
 }
 
-export interface UseUndoableDatabaseOptions {
-  onDataMutation?: (
-    prevDb: AppDatabase,
-    nextDb: AppDatabase,
-    label: string
-  ) => void;
-}
-
-export function useUndoableDatabase(options?: UseUndoableDatabaseOptions) {
+export function useUndoableDatabase() {
   const [state, setState] = useState<UndoableState>(() => ({
     db: loadDatabase(),
     past: [],
@@ -49,10 +41,7 @@ export function useUndoableDatabase(options?: UseUndoableDatabaseOptions) {
   const stateRef = useRef<UndoableState>(state);
   stateRef.current = state;
 
-  const onDataMutationRef = useRef(options?.onDataMutation);
-  onDataMutationRef.current = options?.onDataMutation;
-
-  // Persist every committed state (including undo/redo/sync restorations) automatically
+  // Persist every committed state (including undo/redo restorations) automatically in localStorage
   useEffect(() => {
     saveDatabase(state.db);
   }, [state.db]);
@@ -91,34 +80,9 @@ export function useUndoableDatabase(options?: UseUndoableDatabaseOptions) {
       };
       stateRef.current = nextState;
       setState(nextState);
-      onDataMutationRef.current?.(prevDb, nextDb, label);
     },
     []
   );
-
-  /**
-   * Apply a database received from Google Drive sync or conflict resolution without
-   * triggering a redundant local-change loop.
-   */
-  const applyExternalDatabase = useCallback((nextDb: AppDatabase) => {
-    setState((prevState) => {
-      const nextActiveId = reconcileActiveClassId(
-        prevState.db.activeClassId,
-        nextDb.activeClassId,
-        nextDb.classes
-      );
-      const normalized: AppDatabase = {
-        ...nextDb,
-        activeClassId: nextActiveId,
-      };
-      const nextState: UndoableState = {
-        ...prevState,
-        db: normalized,
-      };
-      stateRef.current = nextState;
-      return nextState;
-    });
-  }, []);
 
   /**
    * Update non-historical navigation state (e.g., switching the active class)
@@ -173,7 +137,6 @@ export function useUndoableDatabase(options?: UseUndoableDatabaseOptions) {
 
     stateRef.current = nextState;
     setState(nextState);
-    onDataMutationRef.current?.(current.db, nextDb, `Annulla: ${previous.label}`);
     return previous.label;
   }, []);
 
@@ -211,7 +174,6 @@ export function useUndoableDatabase(options?: UseUndoableDatabaseOptions) {
 
     stateRef.current = nextState;
     setState(nextState);
-    onDataMutationRef.current?.(current.db, nextDb, `Ripristina: ${next.label}`);
     return next.label;
   }, []);
 
@@ -224,7 +186,6 @@ export function useUndoableDatabase(options?: UseUndoableDatabaseOptions) {
     undoCount: state.past.length,
     redoCount: state.future.length,
     commitChange,
-    applyExternalDatabase,
     setActiveClassId,
     undo,
     redo,

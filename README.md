@@ -70,21 +70,10 @@ Apri **https://adrianoruzza.github.io/TestMark/** dal browser del dispositivo:
 - Dopo la prima apertura online, TestMark funziona anche **offline** (registrazione prove, UNDO/REDO, resoconto, import/export Excel e backup JSON) grazie al precaching Workbox degli asset statici.
 - Quando viene pubblicata una nuova versione su GitHub Pages, l'app mostra un avviso discreto in basso a sinistra (**"Nuova versione disponibile — Aggiorna"**): l'aggiornamento ricarica solo il codice applicativo lasciando **intatti tutti i dati salvati in `localStorage`**.
 
-## Sincronizzazione Google Drive (opzionale, senza chiavi API)
-
-TestMark funziona integralmente anche offline e senza account Google. Per attivare la sincronizzazione multi-dispositivo e i backup manuali nella cartella `SYNC_TestMark` (e sottocartella `BACKUP`) del proprio Google Drive:
-
-- L'autenticazione utilizza esclusivamente **Google Identity Services (OAuth 2.0 client-side)** con scope minimo `https://www.googleapis.com/auth/drive.file`.
-- **Non viene utilizzata alcuna Google API Key (`AIza...`) né alcun OAuth Client Secret (`GOCSPX-...`).**
-- È richiesto solo l'identificativo pubblico **OAuth 2.0 Web Client ID** (`*.apps.googleusercontent.com`), protetto lato Google dalle **Origini JavaScript autorizzate**:
-  1. In Google Cloud Console → **API e servizi → Credenziali**, configura un Client ID OAuth 2.0 di tipo *Applicazione web* con origine JavaScript autorizzata `https://adrianoruzza.github.io` (e `http://localhost:3000` per test locali).
-  2. In GitHub → **Settings → Secrets and variables → Actions → Variables**, crea la variabile `VITE_GOOGLE_CLIENT_ID` con il valore del Client ID pubblico.
-  3. Per lo sviluppo locale, copia `.env.example` in `.env.local` (escluso da Git) e imposta `VITE_GOOGLE_CLIENT_ID`.
-
 ## Privacy e sicurezza dei dati
 
-- **Nessuna chiave API, nessun Client Secret e nessuna credenziale privata** è presente nel repository o nei file generati in `dist/` (il workflow GitHub Actions blocca automaticamente il deploy se rileva chiavi o segreti nel codice o nella build).
-- I token OAuth temporanei di accesso a Google Drive vengono conservati **solo nella memoria RAM della sessione** e mai in `localStorage` o `sessionStorage`.
-- Tutti i dati degli studenti sono salvati localmente in `localStorage` nel browser del dispositivo (mai nella cache del Service Worker) e, solo se il docente collega volontariamente il proprio account Google, sincronizzati nel proprio Google Drive personale dentro `SYNC_TestMark`.
-- Il file `.gitignore` esclude automaticamente file `.env*`, file di configurazione/credenziali (`firebase-applet-config.json`, `firebase-*.json`, `*service-account*.json`, `*client_secret*.json`, `*.pem`, `*.key`) e file di elenchi/backup degli studenti (`*.xlsx`, `*.xls`, `*.docx`, `*.csv`, `registro-prove-backup-*.json`, `studenti*.txt`, `backups/`, `exports/`).
-- Esegui periodicamente un **Backup manuale su Google Drive** o un **Backup completo (`.json`)** dalla sezione *Classi e Backup* per conservare una copia personale dei tuoi archivi.
+- **Architettura 100% locale e indipendente:** TestMark non utilizza Google Drive, OAuth 2.0, servizi cloud esterni, backend né chiavi API.
+- **Nessuna credenziale o segreto** è presente nel repository o nei file generati in `dist/` (il workflow GitHub Actions blocca automaticamente il deploy se rileva chiavi, token, source map o riferimenti OAuth/Drive).
+- Tutti i dati degli studenti e le impostazioni delle classi vengono salvati esclusivamente in locale nel browser (`localStorage`, mai nella cache del Service Worker e mai inviati a server esterni).
+- Il file `.gitignore` esclude automaticamente file `.env*`, file di configurazione/credenziali (`firebase-*.json`, `google-services.json`, `*service-account*.json`, `*client_secret*.json`, `oauth*.json`, `*.pem`, `*.key`), cartelle temporanee e file di elenchi/backup degli studenti (`*.xlsx`, `*.xls`, `*.docx`, `*.csv`, `registro-prove-backup-*.json`, `studenti*.txt`, `backups/`, `exports/`).
+- Esegui periodicamente un **Backup completo (`.json`)** o un’esportazione **Excel (`.xlsx`)** dalla sezione *Classi e Backup* per conservare una copia personale dei tuoi archivi o trasferirli tra dispositivi diversi.

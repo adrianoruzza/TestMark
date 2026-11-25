@@ -9,16 +9,13 @@ import {
   Settings2,
   Trash2,
 } from 'lucide-react';
-import { GoogleDriveSyncController } from '../hooks/useGoogleDriveSync';
 import { AppDatabase, SchoolClass } from '../types';
 import { evaluateStudent } from '../utils/calculations';
 import { exportAllClassesToExcel, exportClassToExcel } from '../utils/excelExport';
 import { exportDatabaseBackupJson, parseBackupFile } from '../utils/storage';
-import { GoogleDriveBackupSection } from './GoogleSyncControls';
 
 interface ArchiveSettingsViewProps {
   db: AppDatabase;
-  driveSync: GoogleDriveSyncController;
   onEditClass: (cls: SchoolClass) => void;
   onRequestDeleteClass: (cls: SchoolClass) => void;
   onOpenClass: (classId: string) => void;
@@ -27,7 +24,6 @@ interface ArchiveSettingsViewProps {
 
 export const ArchiveSettingsView: React.FC<ArchiveSettingsViewProps> = ({
   db,
-  driveSync,
   onEditClass,
   onRequestDeleteClass,
   onOpenClass,
@@ -195,9 +191,6 @@ export const ArchiveSettingsView: React.FC<ArchiveSettingsViewProps> = ({
           </table>
         </div>
       </section>
-
-      {/* Google Drive Sync & Verified Manual Backups */}
-      <GoogleDriveBackupSection sync={driveSync} />
 
       {/* Compact Export & Backup Two-Column Grid */}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
