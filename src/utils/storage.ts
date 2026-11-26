@@ -1,7 +1,18 @@
 import { createSeedDatabase } from '../data/seedData';
 import { AppDatabase, DEFAULT_MINIMUMS, SchoolClass } from '../types';
+import {
+  DEFAULT_UI_STATE,
+  PersistedUiState,
+  readMainDatabaseFromIndexedDB,
+  readUiStateFromIndexedDB,
+  requestPersistentStorage,
+  sanitizeUiState,
+  writeMainDatabaseToIndexedDB,
+  writeUiStateToIndexedDB,
+} from './indexedDbStorage';
 
 export const STORAGE_KEY = 'registro_prove_app_db_v1';
+export const UI_STATE_STORAGE_KEY = 'testmark_ui_state_v1';
 
 function sanitizeClass(raw: Partial<SchoolClass>): SchoolClass | null {
   if (!raw || typeof raw.id !== 'string' || typeof raw.name !== 'string') {
@@ -11,7 +22,10 @@ function sanitizeClass(raw: Partial<SchoolClass>): SchoolClass | null {
   return {
     id: raw.id,
     name: raw.name.trim() || 'Classe senza nome',
-    schoolYear: typeof raw.schoolYear === 'string' && raw.schoolYear.trim() ? raw.schoolYear.trim() : '2026/2027',
+    schoolYear:
+      typeof raw.schoolYear === 'string' && raw.schoolYear.trim()
+        ? raw.schoolYear.trim()
+        : '2026/2027',
     minimums: {
       COMPITO_GRAFICO: Math.max(
         0,
@@ -19,7 +33,10 @@ function sanitizeClass(raw: Partial<SchoolClass>): SchoolClass | null {
       ),
       INTERROGAZIONE_ORALE: Math.max(
         0,
-        Number(raw.minimums?.INTERROGAZIONE_ORALE ?? DEFAULT_MINIMUMS.INTERROGAZIONE_ORALE)
+        Number(
+          raw.minimums?.INTERROGAZIONE_ORALE ??
+            DEFAULT_MINIMUMS.INTERROGAZIONE_ORALE
+        )
       ),
       CONSEGNA_PRATICO: Math.max(
         0,
@@ -27,16 +44,21 @@ function sanitizeClass(raw: Partial<SchoolClass>): SchoolClass | null {
       ),
     },
     includeArchivedInCount:
-      typeof raw.includeArchivedInCount === 'boolean' ? raw.includeArchivedInCount : true,
+      typeof raw.includeArchivedInCount === 'boolean'
+        ? raw.includeArchivedInCount
+        : true,
     activities: Array.isArray(raw.activities) ? raw.activities : [],
     students: Array.isArray(raw.students)
       ? raw.students.map((s) => ({
           ...s,
           records: s.records && typeof s.records === 'object' ? s.records : {},
-          archivedHistory: Array.isArray(s.archivedHistory) ? s.archivedHistory : [],
+          archivedHistory: Array.isArray(s.archivedHistory)
+            ? s.archivedHistory
+            : [],
         }))
       : [],
-    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
+    createdAt:
+      typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
   };
 }
 
@@ -56,62 +78,174 @@ export function validateDatabase(raw: unknown): AppDatabase | null {
 
   return {
     version: 1,
-    updatedAt: typeof candidate.updatedAt === 'string' ? candidate.updatedAt : new Date().toISOString(),
+    updatedAt:
+      typeof candidate.updatedAt === 'string'
+        ? candidate.updatedAt
+        : new Date().toISOString(),
     activeClassId,
     classes,
   };
 }
 
-export function loadDatabase(): AppDatabase {
+/**
+ * Reads a previously saved database from localStorage without ever overwriting
+ * or mutating storage. Used strictly for legacy migration and emergency close recovery.
+ */
+export function readLegacyLocalStorageDatabase(): AppDatabase | null {
   try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      const seed = createSeedDatabase();
-      saveDatabase(seed);
-      return seed;
-    }
+    if (!raw) return null;
     const parsed = JSON.parse(raw);
-    const validated = validateDatabase(parsed);
-    if (validated) {
-      return validated;
-    }
+    return validateDatabase(parsed);
   } catch {
-    // Fall back to seed data if storage is unavailable or corrupted
+    return null;
   }
-  const seed = createSeedDatabase();
-  saveDatabase(seed);
-  return seed;
 }
 
+/**
+ * Best-effort synchronous mirror to localStorage used strictly as a crash/beforeunload
+ * safety net alongside IndexedDB. Silently returns false if quota is exceeded.
+ */
 export function saveDatabase(db: AppDatabase): boolean {
   try {
-    const payload: AppDatabase = {
-      ...db,
-      updatedAt: new Date().toISOString(),
-    };
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    if (typeof window === 'undefined' || !window.localStorage) return false;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     return true;
   } catch {
     return false;
   }
 }
 
+export function readUiStateFromLocalStorage(): PersistedUiState | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    const raw = window.localStorage.getItem(UI_STATE_STORAGE_KEY);
+    if (!raw) return null;
+    return sanitizeUiState(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+export function saveUiStateToLocalStorage(uiState: PersistedUiState): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem(
+      UI_STATE_STORAGE_KEY,
+      JSON.stringify(sanitizeUiState(uiState))
+    );
+  } catch {
+    // Ignore localStorage quota errors for UI preferences
+  }
+}
+
+export interface InitialLoadResult {
+  db: AppDatabase;
+  uiState: PersistedUiState;
+  isFirstLaunch: boolean;
+}
+
+function parseTimestampMs(iso: string | undefined): number {
+  if (!iso) return 0;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Startup loading sequence:
+ * 1. Requests durable browser storage permission (best-effort)
+ * 2. Reads main database and UI state from IndexedDB (throws if IndexedDB fails; never deletes data)
+ * 3. Uses saved IndexedDB data immediately (or migrates legacy localStorage data if present)
+ * 4. Creates demo seed data ONLY on the very first launch when zero saved data exists
+ */
+export async function loadInitialAppState(): Promise<InitialLoadResult> {
+  void requestPersistentStorage();
+
+  const [idbRawDb, idbUiState] = await Promise.all([
+    readMainDatabaseFromIndexedDB(),
+    readUiStateFromIndexedDB().catch(() => null),
+  ]);
+
+  const idbDb = idbRawDb ? validateDatabase(idbRawDb) : null;
+  if (idbRawDb && !idbDb) {
+    throw new Error(
+      'I dati trovati in IndexedDB hanno una struttura non valida. Nessun dato è stato eliminato o sovrascritto.'
+    );
+  }
+
+  const legacyLsDb = readLegacyLocalStorageDatabase();
+  const uiState =
+    idbUiState ?? readUiStateFromLocalStorage() ?? { ...DEFAULT_UI_STATE };
+
+  // Case 1: Both IndexedDB and localStorage mirror exist — keep the most recently updated snapshot
+  if (idbDb && legacyLsDb) {
+    if (parseTimestampMs(legacyLsDb.updatedAt) > parseTimestampMs(idbDb.updatedAt)) {
+      await writeMainDatabaseToIndexedDB(legacyLsDb);
+      return { db: legacyLsDb, uiState, isFirstLaunch: false };
+    }
+    return { db: idbDb, uiState, isFirstLaunch: false };
+  }
+
+  // Case 2: Saved data exists in IndexedDB (primary archive)
+  if (idbDb) {
+    return { db: idbDb, uiState, isFirstLaunch: false };
+  }
+
+  // Case 3: Existing user migrating from earlier localStorage-only version
+  if (legacyLsDb) {
+    await writeMainDatabaseToIndexedDB(legacyLsDb);
+    await writeUiStateToIndexedDB(uiState).catch(() => {});
+    return { db: legacyLsDb, uiState, isFirstLaunch: false };
+  }
+
+  // Case 4: Very first launch ever (no saved data anywhere) — initialize once with demo data
+  const seed = createSeedDatabase();
+  await writeMainDatabaseToIndexedDB(seed);
+  saveDatabase(seed);
+  await writeUiStateToIndexedDB(uiState).catch(() => {});
+  saveUiStateToLocalStorage(uiState);
+  return { db: seed, uiState, isFirstLaunch: true };
+}
+
+/**
+ * Persists the full database immediately to IndexedDB (primary archive)
+ * and updates the synchronous localStorage mirror as a fast crash fallback.
+ */
+export function persistDatabaseImmediately(db: AppDatabase): Promise<void> {
+  saveDatabase(db);
+  return writeMainDatabaseToIndexedDB(db);
+}
+
+/**
+ * Persists UI preferences (active view & filters) to IndexedDB and localStorage.
+ */
+export function persistUiStateImmediately(uiState: PersistedUiState): Promise<void> {
+  saveUiStateToLocalStorage(uiState);
+  return writeUiStateToIndexedDB(uiState);
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
 export function exportDatabaseBackupJson(db: AppDatabase): void {
+  const now = new Date();
   const payload = JSON.stringify(
     {
       ...db,
-      exportedAt: new Date().toISOString(),
-      application: 'Registro Prove',
+      exportedAt: now.toISOString(),
+      application: 'TestMark',
     },
     null,
     2
   );
   const blob = new Blob([payload], { type: 'application/json;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const dateStr = new Date().toISOString().slice(0, 10);
+  const fileName = `TestMark_Backup_${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}_${pad2(now.getHours())}-${pad2(now.getMinutes())}-${pad2(now.getSeconds())}.json`;
   const link = document.createElement('a');
   link.href = url;
-  link.download = `registro-prove-backup-${dateStr}.json`;
+  link.download = fileName;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -130,7 +264,7 @@ export async function parseBackupFile(file: File): Promise<AppDatabase> {
   const validated = validateDatabase(parsed);
   if (!validated) {
     throw new Error(
-      'Struttura del backup non riconosciuta. Assicurati di caricare un file esportato da Registro Prove.'
+      'Struttura del backup non riconosciuta. Assicurati di caricare un file esportato da TestMark.'
     );
   }
 

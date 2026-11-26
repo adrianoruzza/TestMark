@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertCircle,
   ArrowRightLeft,
   CheckCircle2,
   FileSpreadsheet,
+  FolderOpen,
   FolderPlus,
+  Loader2,
   Plus,
   Redo2,
+  RefreshCw,
+  Save,
   Search,
   Settings2,
   Undo2,
   UserPlus,
+  X,
 } from 'lucide-react';
 import { ActivityModal } from './components/ActivityModal';
 import { ArchiveSettingsView } from './components/ArchiveSettingsView';
@@ -40,7 +46,10 @@ import {
   buildArchivedEntriesFromClass,
   evaluateStudent,
 } from './utils/calculations';
+import { saveBackupToDisk } from './utils/diskBackup';
 import { exportClassToExcel } from './utils/excelExport';
+import { PersistedUiState } from './utils/indexedDbStorage';
+import { persistUiStateImmediately } from './utils/storage';
 
 interface ConfirmState {
   title: string;
@@ -50,8 +59,78 @@ interface ConfirmState {
   onConfirm: () => void;
 }
 
+interface ToastNotification {
+  message: string;
+  variant: 'success' | 'info' | 'error';
+  actionLabel?: string;
+  onAction?: () => void;
+}
+
+const APP_ICON_URL = `${import.meta.env.BASE_URL}testmark-icon-192-v4.png`;
+
 export default function App() {
+  const [view, setView] = useState<AppView>('registro');
+
+  // Register filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<ActivityCategory | 'ALL'>('ALL');
+  const [requirementFilter, setRequirementFilter] = useState<'ALL' | 'OK' | 'CARENZA'>('ALL');
+
+  const uiStateRef = useRef<PersistedUiState>({
+    view,
+    searchQuery,
+    categoryFilter,
+    requirementFilter,
+  });
+  uiStateRef.current = {
+    view,
+    searchQuery,
+    categoryFilter,
+    requirementFilter,
+  };
+
+  const [toast, setToast] = useState<ToastNotification | null>(null);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+
+  const showToast = useCallback(
+    (
+      message: string,
+      options?: {
+        variant?: 'success' | 'info' | 'error';
+        actionLabel?: string;
+        onAction?: () => void;
+      }
+    ) => {
+      setToast({
+        message,
+        variant: options?.variant ?? 'success',
+        actionLabel: options?.actionLabel,
+        onAction: options?.onAction,
+      });
+    },
+    []
+  );
+
+  const handleHydratedUiState = useCallback((hydrated: PersistedUiState) => {
+    setView(hydrated.view);
+    setSearchQuery(hydrated.searchQuery);
+    setCategoryFilter(hydrated.categoryFilter);
+    setRequirementFilter(hydrated.requirementFilter);
+  }, []);
+
+  const handlePersistError = useCallback(
+    (message: string) => {
+      showToast(message, { variant: 'error' });
+    },
+    [showToast]
+  );
+
   const {
+    status: dbStatus,
+    loadError: dbLoadError,
+    hasEmergencyFallback,
+    retryLoad,
+    recoverFromLocalFallback,
     db,
     canUndo,
     canRedo,
@@ -61,14 +140,22 @@ export default function App() {
     setActiveClassId,
     undo,
     redo,
-  } = useUndoableDatabase();
+  } = useUndoableDatabase({
+    getUiState: () => uiStateRef.current,
+    onHydratedUiState: handleHydratedUiState,
+    onPersistError: handlePersistError,
+  });
 
-  const [view, setView] = useState<AppView>('registro');
-
-  // Register filters
-  const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<ActivityCategory | 'ALL'>('ALL');
-  const [requirementFilter, setRequirementFilter] = useState<'ALL' | 'OK' | 'CARENZA'>('ALL');
+  // Persist view & filters immediately after initial hydration so the app reopens exactly where left off
+  useEffect(() => {
+    if (dbStatus !== 'ready') return;
+    void persistUiStateImmediately({
+      view,
+      searchQuery,
+      categoryFilter,
+      requirementFilter,
+    }).catch(() => {});
+  }, [dbStatus, view, searchQuery, categoryFilter, requirementFilter]);
 
   // Modals state
   const [activityModalOpen, setActivityModalOpen] = useState(false);
@@ -87,17 +174,62 @@ export default function App() {
   const [historyStudentId, setHistoryStudentId] = useState<string | null>(null);
 
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  const showToast = useCallback((message: string) => {
-    setToastMessage(message);
-  }, []);
 
   useEffect(() => {
-    if (!toastMessage) return;
-    const timer = window.setTimeout(() => setToastMessage(null), 2800);
+    if (!toast) return;
+    const duration =
+      toast.actionLabel || toast.variant === 'error' ? 9000 : 4200;
+    const timer = window.setTimeout(() => setToast(null), duration);
     return () => window.clearTimeout(timer);
-  }, [toastMessage]);
+  }, [toast]);
+
+  const handleQuickDiskBackup = useCallback(
+    async (forcePickDirectory = false) => {
+      if (isBackingUp || dbStatus !== 'ready') return;
+      setIsBackingUp(true);
+      try {
+        const result = await saveBackupToDisk(db, uiStateRef.current, {
+          forcePickDirectory,
+        });
+
+        switch (result.status) {
+          case 'saved_to_folder':
+            showToast(
+              `Backup salvato in ${result.folderName} (${result.timestamp})`,
+              { variant: 'success' }
+            );
+            break;
+          case 'downloaded_fallback':
+            showToast(
+              result.reason === 'unsupported_browser'
+                ? `Backup scaricato (${result.fileName}). Questo browser non supporta la cartella automatica: dovrai scegliere la cartella manualmente ogni volta.`
+                : `Backup scaricato (${result.fileName}). In questa finestra il salvataggio diretto in cartella è bloccato dal browser: apri l’app direttamente nella propria scheda per la cartella automatica.`,
+              { variant: 'info' }
+            );
+            break;
+          case 'cancelled':
+            showToast('Selezione cartella annullata.', { variant: 'info' });
+            break;
+          case 'permission_or_folder_error':
+            showToast(result.message, {
+              variant: 'error',
+              actionLabel: 'Scegli cartella',
+              onAction: () => {
+                setToast(null);
+                void handleQuickDiskBackup(true);
+              },
+            });
+            break;
+          case 'error':
+            showToast(result.message, { variant: 'error' });
+            break;
+        }
+      } finally {
+        setIsBackingUp(false);
+      }
+    },
+    [db, dbStatus, isBackingUp, showToast]
+  );
 
   const anyModalOpen =
     activityModalOpen ||
@@ -633,6 +765,76 @@ export default function App() {
     setClassModalOpen(true);
   };
 
+  if (dbStatus === 'loading') {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4 text-slate-900">
+        <div className="flex flex-col items-center gap-4 rounded-xl border border-slate-200 bg-white px-8 py-7 shadow-sm">
+          <img
+            src={APP_ICON_URL}
+            alt="TestMark"
+            className="h-16 w-16 rounded-xl object-contain"
+          />
+          <div className="flex items-center gap-2.5 text-sm font-semibold text-slate-700">
+            <Loader2 className="h-4 w-4 animate-spin text-blue-700" />
+            <span>Caricamento dati...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (dbStatus === 'error') {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4 text-slate-900">
+        <div className="w-full max-w-md rounded-xl border border-rose-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center gap-3">
+            <img
+              src={APP_ICON_URL}
+              alt="TestMark"
+              className="h-10 w-10 shrink-0 rounded-lg object-contain"
+            />
+            <div>
+              <h1 className="text-base font-bold text-slate-900">
+                Errore durante il caricamento dei dati
+              </h1>
+              <p className="text-xs text-slate-500">
+                Nessun dato esistente è stato cancellato o sovrascritto.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-900">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+            <span>
+              {dbLoadError ||
+                'Impossibile leggere i dati salvati da IndexedDB.'}
+            </span>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+            {hasEmergencyFallback && (
+              <button
+                type="button"
+                onClick={recoverFromLocalFallback}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                Apri copia locale
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void retryLoad()}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-blue-700 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-blue-800"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Riprova caricamento
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`flex flex-col bg-slate-50 text-slate-900 ${
@@ -642,13 +844,18 @@ export default function App() {
       {/* Ultra-Compact Top Bar (44px) optimized for Tablet & Desktop */}
       <header className="no-print sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white">
         <div className="mx-auto flex h-11 max-w-[1600px] items-center justify-between gap-3 px-2.5 sm:gap-6 sm:px-4">
-          {/* Zone 1: Brand Title */}
+          {/* Zone 1: App Icon + Brand Title */}
           <button
             type="button"
             onClick={() => setView('registro')}
-            className="font-display text-sm font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0 focus:outline-none sm:text-base"
+            className="inline-flex items-center gap-2 font-display text-sm font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0 focus:outline-none sm:text-base"
           >
-            Registro Prove
+            <img
+              src={APP_ICON_URL}
+              alt="TestMark"
+              className="h-7 w-7 shrink-0 rounded object-contain"
+            />
+            <span>Registro Prove</span>
           </button>
 
           {/* Zone 2: Navigation Links */}
@@ -697,13 +904,13 @@ export default function App() {
             </button>
           </nav>
 
-          {/* Zone 3: Discrete PWA Install + UNDO / REDO + 1 Contextual Primary Action */}
+          {/* Zone 3: Discrete PWA Install + [UNDO] [REDO] [FLOPPY BACKUP] + 1 Contextual Primary Action */}
           <div className="flex items-center gap-1.5 shrink-0 sm:gap-2">
             <PWAInstallButton />
             <div
               className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50/70 p-0.5"
               role="group"
-              aria-label="Cronologia modifiche"
+              aria-label="Cronologia modifiche e salvataggio backup"
             >
               <button
                 type="button"
@@ -735,6 +942,17 @@ export default function App() {
               >
                 <Redo2 className="h-4 w-4" />
                 <span className="hidden lg:inline">Ripristina</span>
+              </button>
+              <div className="h-4 w-px bg-slate-200" aria-hidden="true" />
+              <button
+                type="button"
+                onClick={() => void handleQuickDiskBackup(false)}
+                disabled={isBackingUp}
+                title="Salva backup"
+                aria-label="Salva backup"
+                className="inline-flex h-8 min-w-[34px] items-center justify-center gap-1 rounded px-2 text-xs font-medium text-slate-700 transition-colors hover:bg-white hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent whitespace-nowrap"
+              >
+                <Save className="h-4 w-4" />
               </button>
             </div>
 
@@ -1061,14 +1279,40 @@ export default function App() {
       <PWAStatusOverlay />
 
       {/* Compact feedback toast */}
-      {toastMessage && (
+      {toast && (
         <div
-          role="status"
+          role={toast.variant === 'error' ? 'alert' : 'status'}
           aria-live="polite"
-          className="no-print fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3.5 py-2 text-xs font-medium text-white shadow-lg"
+          className={`no-print fixed bottom-4 right-4 z-50 flex max-w-md items-center gap-2.5 rounded-lg border px-3.5 py-2.5 text-xs font-medium shadow-lg ${
+            toast.variant === 'error'
+              ? 'border-rose-700 bg-rose-950 text-white'
+              : 'border-slate-800 bg-slate-900 text-white'
+          }`}
         >
-          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-          <span>{toastMessage}</span>
+          {toast.variant === 'error' ? (
+            <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+          ) : (
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+          )}
+          <span className="leading-snug">{toast.message}</span>
+          {toast.actionLabel && toast.onAction && (
+            <button
+              type="button"
+              onClick={toast.onAction}
+              className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-md bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-900 transition-colors hover:bg-slate-100 whitespace-nowrap"
+            >
+              <FolderOpen className="h-3 w-3" />
+              {toast.actionLabel}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Chiudi notifica"
+            className="ml-0.5 shrink-0 rounded p-0.5 text-slate-400 hover:bg-white/10 hover:text-white"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
     </div>
