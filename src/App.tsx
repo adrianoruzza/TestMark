@@ -48,8 +48,7 @@ import {
 } from './utils/calculations';
 import { saveBackupToDisk } from './utils/diskBackup';
 import { exportClassToExcel } from './utils/excelExport';
-import { PersistedUiState } from './utils/indexedDbStorage';
-import { persistUiStateImmediately } from './utils/storage';
+import { PersistedUiState, saveUiStateToLocalStorage } from './utils/storage';
 
 interface ConfirmState {
   title: string;
@@ -146,15 +145,15 @@ export default function App() {
     onPersistError: handlePersistError,
   });
 
-  // Persist view & filters immediately after initial hydration so the app reopens exactly where left off
+  // Persist view & filters in localStorage after initial hydration so the app reopens exactly where left off
   useEffect(() => {
     if (dbStatus !== 'ready') return;
-    void persistUiStateImmediately({
+    saveUiStateToLocalStorage({
       view,
       searchQuery,
       categoryFilter,
       requirementFilter,
-    }).catch(() => {});
+    });
   }, [dbStatus, view, searchQuery, categoryFilter, requirementFilter]);
 
   // Modals state
@@ -855,7 +854,7 @@ export default function App() {
               alt="TestMark"
               className="h-7 w-7 shrink-0 rounded object-contain"
             />
-            <span>Registro Prove</span>
+            <span>TestMark</span>
           </button>
 
           {/* Zone 2: Navigation Links */}

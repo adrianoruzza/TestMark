@@ -1,38 +1,23 @@
-import { ActivityCategory, AppDatabase, AppView, CATEGORY_ORDER } from '../types';
+import { AppDatabase } from '../types';
 
-export const IDB_NAME = 'TestMarkDB';
-export const IDB_VERSION = 1;
-export const STORE_APP_DATA = 'app_data';
-export const STORE_BACKUP_HANDLES = 'backup_handles';
+const IDB_NAME = 'TestMarkDB';
+const IDB_VERSION = 1;
+const STORE_APP_DATA = 'app_data';
+const STORE_BACKUP_HANDLES = 'backup_handles';
 
 const KEY_MAIN_DATABASE = 'main_database';
-const KEY_UI_STATE = 'ui_state';
 const KEY_BACKUP_DIRECTORY = 'backup_directory';
 
-export interface PersistedUiState {
-  view: AppView;
-  searchQuery: string;
-  categoryFilter: ActivityCategory | 'ALL';
-  requirementFilter: 'ALL' | 'OK' | 'CARENZA';
-}
-
-export const DEFAULT_UI_STATE: PersistedUiState = {
-  view: 'registro',
-  searchQuery: '',
-  categoryFilter: 'ALL',
-  requirementFilter: 'ALL',
-};
-
-export interface FileSystemPermissionDescriptorLike {
+interface FileSystemPermissionDescriptorLike {
   mode?: 'read' | 'readwrite';
 }
 
-export interface FileSystemWritableFileStreamLike {
+interface FileSystemWritableFileStreamLike {
   write: (data: string | Blob | ArrayBuffer | ArrayBufferView) => Promise<void>;
   close: () => Promise<void>;
 }
 
-export interface FileSystemFileHandleLike {
+interface FileSystemFileHandleLike {
   kind: 'file';
   name: string;
   createWritable: () => Promise<FileSystemWritableFileStreamLike>;
@@ -59,54 +44,11 @@ interface MainDatabaseRecord {
   savedAt: string;
 }
 
-interface UiStateRecord {
-  id: typeof KEY_UI_STATE;
-  uiState: PersistedUiState;
-  savedAt: string;
-}
-
 interface BackupDirectoryRecord {
   id: typeof KEY_BACKUP_DIRECTORY;
   handle: FileSystemDirectoryHandleLike;
   folderName: string;
   savedAt: string;
-}
-
-export function sanitizeUiState(raw: unknown): PersistedUiState {
-  if (!raw || typeof raw !== 'object') {
-    return { ...DEFAULT_UI_STATE };
-  }
-
-  const candidate = raw as Partial<PersistedUiState>;
-  const validViews: AppView[] = ['registro', 'resoconto', 'archivio'];
-  const view: AppView =
-    typeof candidate.view === 'string' && validViews.includes(candidate.view as AppView)
-      ? (candidate.view as AppView)
-      : DEFAULT_UI_STATE.view;
-
-  const searchQuery =
-    typeof candidate.searchQuery === 'string' ? candidate.searchQuery : '';
-
-  const categoryFilter: ActivityCategory | 'ALL' =
-    candidate.categoryFilter === 'ALL' ||
-    (typeof candidate.categoryFilter === 'string' &&
-      CATEGORY_ORDER.includes(candidate.categoryFilter as ActivityCategory))
-      ? (candidate.categoryFilter as ActivityCategory | 'ALL')
-      : 'ALL';
-
-  const requirementFilter: 'ALL' | 'OK' | 'CARENZA' =
-    candidate.requirementFilter === 'ALL' ||
-    candidate.requirementFilter === 'OK' ||
-    candidate.requirementFilter === 'CARENZA'
-      ? candidate.requirementFilter
-      : 'ALL';
-
-  return {
-    view,
-    searchQuery,
-    categoryFilter,
-    requirementFilter,
-  };
 }
 
 let cachedDbPromise: Promise<IDBDatabase> | null = null;
@@ -278,21 +220,6 @@ export function writeMainDatabaseToIndexedDB(db: AppDatabase): Promise<void> {
 
   writeQueue = task;
   return task;
-}
-
-export function readUiStateFromIndexedDB(): Promise<PersistedUiState | null> {
-  return getRecord<UiStateRecord>(STORE_APP_DATA, KEY_UI_STATE).then((record) =>
-    record?.uiState ? sanitizeUiState(record.uiState) : null
-  );
-}
-
-export function writeUiStateToIndexedDB(uiState: PersistedUiState): Promise<void> {
-  const record: UiStateRecord = {
-    id: KEY_UI_STATE,
-    uiState: sanitizeUiState(uiState),
-    savedAt: new Date().toISOString(),
-  };
-  return putRecord(STORE_APP_DATA, record);
 }
 
 export function readBackupDirectoryHandle(): Promise<FileSystemDirectoryHandleLike | null> {

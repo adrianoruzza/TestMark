@@ -1,11 +1,11 @@
 import { AppDatabase } from '../types';
 import {
   FileSystemDirectoryHandleLike,
-  PersistedUiState,
   clearBackupDirectoryHandle,
   readBackupDirectoryHandle,
   writeBackupDirectoryHandle,
 } from './indexedDbStorage';
+import { PersistedUiState } from './storage';
 
 interface WindowWithDirectoryPicker extends Window {
   showDirectoryPicker?: (options?: {

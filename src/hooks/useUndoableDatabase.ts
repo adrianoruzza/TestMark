@@ -3,11 +3,8 @@ import { AppDatabase, SchoolClass } from '../types';
 import {
   DEFAULT_UI_STATE,
   PersistedUiState,
-} from '../utils/indexedDbStorage';
-import {
   loadInitialAppState,
   persistDatabaseImmediately,
-  persistUiStateImmediately,
   readLegacyLocalStorageDatabase,
   saveDatabase,
   saveUiStateToLocalStorage,
@@ -130,11 +127,10 @@ export function useUndoableDatabase(options: UseUndoableDatabaseOptions = {}) {
         ? optionsRef.current.getUiState()
         : DEFAULT_UI_STATE;
 
-      // Synchronous safety net + immediate IndexedDB flush
+      // Synchronous localStorage save (UI state + DB safety mirror) + immediate IndexedDB flush for DB
       saveDatabase(currentDb);
       saveUiStateToLocalStorage(currentUi);
       void persistDatabaseImmediately(currentDb).catch(() => {});
-      void persistUiStateImmediately(currentUi).catch(() => {});
     };
 
     const handleVisibilityChange = () => {

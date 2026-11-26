@@ -1,18 +1,72 @@
 import { createSeedDatabase } from '../data/seedData';
-import { AppDatabase, DEFAULT_MINIMUMS, SchoolClass } from '../types';
 import {
-  DEFAULT_UI_STATE,
-  PersistedUiState,
+  ActivityCategory,
+  AppDatabase,
+  AppView,
+  CATEGORY_ORDER,
+  DEFAULT_MINIMUMS,
+  SchoolClass,
+} from '../types';
+import {
   readMainDatabaseFromIndexedDB,
-  readUiStateFromIndexedDB,
   requestPersistentStorage,
-  sanitizeUiState,
   writeMainDatabaseToIndexedDB,
-  writeUiStateToIndexedDB,
 } from './indexedDbStorage';
 
-export const STORAGE_KEY = 'registro_prove_app_db_v1';
-export const UI_STATE_STORAGE_KEY = 'testmark_ui_state_v1';
+const STORAGE_KEY = 'registro_prove_app_db_v1';
+const UI_STATE_STORAGE_KEY = 'testmark_ui_state_v1';
+
+export interface PersistedUiState {
+  view: AppView;
+  searchQuery: string;
+  categoryFilter: ActivityCategory | 'ALL';
+  requirementFilter: 'ALL' | 'OK' | 'CARENZA';
+}
+
+export const DEFAULT_UI_STATE: PersistedUiState = {
+  view: 'registro',
+  searchQuery: '',
+  categoryFilter: 'ALL',
+  requirementFilter: 'ALL',
+};
+
+function sanitizeUiState(raw: unknown): PersistedUiState {
+  if (!raw || typeof raw !== 'object') {
+    return { ...DEFAULT_UI_STATE };
+  }
+
+  const candidate = raw as Partial<PersistedUiState>;
+  const validViews: AppView[] = ['registro', 'resoconto', 'archivio'];
+  const view: AppView =
+    typeof candidate.view === 'string' &&
+    validViews.includes(candidate.view as AppView)
+      ? (candidate.view as AppView)
+      : DEFAULT_UI_STATE.view;
+
+  const searchQuery =
+    typeof candidate.searchQuery === 'string' ? candidate.searchQuery : '';
+
+  const categoryFilter: ActivityCategory | 'ALL' =
+    candidate.categoryFilter === 'ALL' ||
+    (typeof candidate.categoryFilter === 'string' &&
+      CATEGORY_ORDER.includes(candidate.categoryFilter as ActivityCategory))
+      ? (candidate.categoryFilter as ActivityCategory | 'ALL')
+      : 'ALL';
+
+  const requirementFilter: 'ALL' | 'OK' | 'CARENZA' =
+    candidate.requirementFilter === 'ALL' ||
+    candidate.requirementFilter === 'OK' ||
+    candidate.requirementFilter === 'CARENZA'
+      ? candidate.requirementFilter
+      : 'ALL';
+
+  return {
+    view,
+    searchQuery,
+    categoryFilter,
+    requirementFilter,
+  };
+}
 
 function sanitizeClass(raw: Partial<SchoolClass>): SchoolClass | null {
   if (!raw || typeof raw.id !== 'string' || typeof raw.name !== 'string') {
@@ -62,7 +116,7 @@ function sanitizeClass(raw: Partial<SchoolClass>): SchoolClass | null {
   };
 }
 
-export function validateDatabase(raw: unknown): AppDatabase | null {
+function validateDatabase(raw: unknown): AppDatabase | null {
   if (!raw || typeof raw !== 'object') return null;
   const candidate = raw as Partial<AppDatabase>;
   if (!Array.isArray(candidate.classes)) return null;
@@ -117,7 +171,7 @@ export function saveDatabase(db: AppDatabase): boolean {
   }
 }
 
-export function readUiStateFromLocalStorage(): PersistedUiState | null {
+function readUiStateFromLocalStorage(): PersistedUiState | null {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return null;
     const raw = window.localStorage.getItem(UI_STATE_STORAGE_KEY);
@@ -140,7 +194,7 @@ export function saveUiStateToLocalStorage(uiState: PersistedUiState): void {
   }
 }
 
-export interface InitialLoadResult {
+interface InitialLoadResult {
   db: AppDatabase;
   uiState: PersistedUiState;
   isFirstLaunch: boolean;
@@ -155,17 +209,15 @@ function parseTimestampMs(iso: string | undefined): number {
 /**
  * Startup loading sequence:
  * 1. Requests durable browser storage permission (best-effort)
- * 2. Reads main database and UI state from IndexedDB (throws if IndexedDB fails; never deletes data)
+ * 2. Reads main database from IndexedDB (throws if IndexedDB fails; never deletes data)
+ *    and UI preferences (last view & filters) from localStorage
  * 3. Uses saved IndexedDB data immediately (or migrates legacy localStorage data if present)
  * 4. Creates demo seed data ONLY on the very first launch when zero saved data exists
  */
 export async function loadInitialAppState(): Promise<InitialLoadResult> {
   void requestPersistentStorage();
 
-  const [idbRawDb, idbUiState] = await Promise.all([
-    readMainDatabaseFromIndexedDB(),
-    readUiStateFromIndexedDB().catch(() => null),
-  ]);
+  const idbRawDb = await readMainDatabaseFromIndexedDB();
 
   const idbDb = idbRawDb ? validateDatabase(idbRawDb) : null;
   if (idbRawDb && !idbDb) {
@@ -175,8 +227,7 @@ export async function loadInitialAppState(): Promise<InitialLoadResult> {
   }
 
   const legacyLsDb = readLegacyLocalStorageDatabase();
-  const uiState =
-    idbUiState ?? readUiStateFromLocalStorage() ?? { ...DEFAULT_UI_STATE };
+  const uiState = readUiStateFromLocalStorage() ?? { ...DEFAULT_UI_STATE };
 
   // Case 1: Both IndexedDB and localStorage mirror exist — keep the most recently updated snapshot
   if (idbDb && legacyLsDb) {
@@ -195,7 +246,6 @@ export async function loadInitialAppState(): Promise<InitialLoadResult> {
   // Case 3: Existing user migrating from earlier localStorage-only version
   if (legacyLsDb) {
     await writeMainDatabaseToIndexedDB(legacyLsDb);
-    await writeUiStateToIndexedDB(uiState).catch(() => {});
     return { db: legacyLsDb, uiState, isFirstLaunch: false };
   }
 
@@ -203,7 +253,6 @@ export async function loadInitialAppState(): Promise<InitialLoadResult> {
   const seed = createSeedDatabase();
   await writeMainDatabaseToIndexedDB(seed);
   saveDatabase(seed);
-  await writeUiStateToIndexedDB(uiState).catch(() => {});
   saveUiStateToLocalStorage(uiState);
   return { db: seed, uiState, isFirstLaunch: true };
 }
@@ -215,14 +264,6 @@ export async function loadInitialAppState(): Promise<InitialLoadResult> {
 export function persistDatabaseImmediately(db: AppDatabase): Promise<void> {
   saveDatabase(db);
   return writeMainDatabaseToIndexedDB(db);
-}
-
-/**
- * Persists UI preferences (active view & filters) to IndexedDB and localStorage.
- */
-export function persistUiStateImmediately(uiState: PersistedUiState): Promise<void> {
-  saveUiStateToLocalStorage(uiState);
-  return writeUiStateToIndexedDB(uiState);
 }
 
 function pad2(n: number): string {
