@@ -8,9 +8,11 @@ import {
   SchoolClass,
 } from '../types';
 import {
-  readMainDatabaseFromIndexedDB,
+  MainDatabaseSnapshot,
+  readMainDatabaseSnapshotFromIndexedDB,
+  readPreviousDatabaseSnapshotFromIndexedDB,
   requestPersistentStorage,
-  writeMainDatabaseToIndexedDB,
+  writeMainDatabaseSnapshotToIndexedDB,
 } from './indexedDbStorage';
 
 const STORAGE_KEY = 'registro_prove_app_db_v1';
@@ -141,44 +143,74 @@ function validateDatabase(raw: unknown): AppDatabase | null {
   };
 }
 
-/**
- * Reads a previously saved database from localStorage without ever overwriting
- * or mutating storage. Used strictly for legacy migration and emergency close recovery.
- */
-export function readLegacyLocalStorageDatabase(): AppDatabase | null {
+interface LocalStorageMirrorSnapshot {
+  db: AppDatabase;
+  revision: number | null;
+  isSeed: boolean;
+}
+
+function readLocalStorageMirrorSnapshot(): LocalStorageMirrorSnapshot | null {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return null;
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return validateDatabase(parsed);
+    const parsed = JSON.parse(raw) as Record<string, unknown> | null;
+    const validated = validateDatabase(parsed);
+    if (!validated) return null;
+    const rawRev = parsed?._revision;
+    const revision =
+      typeof rawRev === 'number' && Number.isFinite(rawRev) ? rawRev : null;
+    const isSeed = Boolean(parsed?._isSeed);
+    return { db: validated, revision, isSeed };
   } catch {
     return null;
   }
 }
 
 /**
- * Best-effort synchronous mirror to localStorage used strictly as a crash/beforeunload
- * safety net alongside IndexedDB. Silently returns false if quota is exceeded.
+ * Reads a previously saved database from localStorage without ever overwriting
+ * or mutating storage. Used strictly for legacy migration and emergency recovery.
  */
-export function saveDatabase(db: AppDatabase): boolean {
+export function readLegacyLocalStorageDatabase(): AppDatabase | null {
+  return readLocalStorageMirrorSnapshot()?.db ?? null;
+}
+
+/**
+ * Best-effort synchronous mirror to localStorage used strictly as a crash/beforeunload
+ * safety net alongside IndexedDB. Includes the monotonic revision counter so recovery
+ * never relies on unreliable device wall-clock timestamps.
+ */
+export function saveDatabase(
+  db: AppDatabase,
+  revision = 1,
+  isSeed = false
+): boolean {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return false;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        ...db,
+        _revision: revision,
+        _isSeed: isSeed,
+      })
+    );
     return true;
   } catch {
     return false;
   }
 }
 
-function readUiStateFromLocalStorage(): PersistedUiState | null {
+export function readUiStateFromLocalStorage(): PersistedUiState {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return null;
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return { ...DEFAULT_UI_STATE };
+    }
     const raw = window.localStorage.getItem(UI_STATE_STORAGE_KEY);
-    if (!raw) return null;
+    if (!raw) return { ...DEFAULT_UI_STATE };
     return sanitizeUiState(JSON.parse(raw));
   } catch {
-    return null;
+    return { ...DEFAULT_UI_STATE };
   }
 }
 
@@ -194,76 +226,158 @@ export function saveUiStateToLocalStorage(uiState: PersistedUiState): void {
   }
 }
 
-interface InitialLoadResult {
+export interface InitialLoadResult {
   db: AppDatabase;
+  revision: number;
   uiState: PersistedUiState;
   isFirstLaunch: boolean;
 }
 
-function parseTimestampMs(iso: string | undefined): number {
-  if (!iso) return 0;
-  const ms = Date.parse(iso);
-  return Number.isFinite(ms) ? ms : 0;
+function validateSnapshot(
+  snapshot: MainDatabaseSnapshot | null
+): MainDatabaseSnapshot | null {
+  if (!snapshot) return null;
+  const validated = validateDatabase(snapshot.db);
+  if (!validated) return null;
+  return {
+    ...snapshot,
+    db: validated,
+  };
 }
 
 /**
  * Startup loading sequence:
  * 1. Requests durable browser storage permission (best-effort)
- * 2. Reads main database from IndexedDB (throws if IndexedDB fails; never deletes data)
- *    and UI preferences (last view & filters) from localStorage
- * 3. Uses saved IndexedDB data immediately (or migrates legacy localStorage data if present)
- * 4. Creates demo seed data ONLY on the very first launch when zero saved data exists
+ * 2. Reads main database snapshot from IndexedDB (falling back to atomic previous snapshot
+ *    if main record was ever corrupted; throws on IndexedDB open/read error without deleting data)
+ * 3. Uses revision-guarded reconciliation with localStorage mirror (NEVER compares wall-clock
+ *    timestamps, preventing stale future-dated seed snapshots from overwriting user data)
+ * 4. Creates demo seed data ONLY when zero valid saved data exists anywhere
  */
 export async function loadInitialAppState(): Promise<InitialLoadResult> {
   void requestPersistentStorage();
 
-  const idbRawDb = await readMainDatabaseFromIndexedDB();
+  const rawIdbSnapshot = await readMainDatabaseSnapshotFromIndexedDB();
+  let idbSnapshot = validateSnapshot(rawIdbSnapshot);
 
-  const idbDb = idbRawDb ? validateDatabase(idbRawDb) : null;
-  if (idbRawDb && !idbDb) {
-    throw new Error(
-      'I dati trovati in IndexedDB hanno una struttura non valida. Nessun dato è stato eliminato o sovrascritto.'
+  // If main record existed in IndexedDB but failed validation, try atomic previous snapshot
+  if (rawIdbSnapshot && !idbSnapshot) {
+    const previousSnapshot = validateSnapshot(
+      await readPreviousDatabaseSnapshotFromIndexedDB().catch(() => null)
     );
+    if (previousSnapshot) {
+      idbSnapshot = previousSnapshot;
+    } else {
+      throw new Error(
+        'I dati trovati in IndexedDB hanno una struttura non valida. Nessun dato è stato eliminato o sovrascritto.'
+      );
+    }
   }
 
-  const legacyLsDb = readLegacyLocalStorageDatabase();
-  const uiState = readUiStateFromLocalStorage() ?? { ...DEFAULT_UI_STATE };
+  const lsMirror = readLocalStorageMirrorSnapshot();
+  const uiState = readUiStateFromLocalStorage();
 
-  // Case 1: Both IndexedDB and localStorage mirror exist — keep the most recently updated snapshot
-  if (idbDb && legacyLsDb) {
-    if (parseTimestampMs(legacyLsDb.updatedAt) > parseTimestampMs(idbDb.updatedAt)) {
-      await writeMainDatabaseToIndexedDB(legacyLsDb);
-      return { db: legacyLsDb, uiState, isFirstLaunch: false };
+  // Case 1: Both IndexedDB and localStorage mirror exist
+  if (idbSnapshot && lsMirror) {
+    // Promote localStorage ONLY if it carries a strictly higher monotonic revision
+    // (e.g. an emergency synchronous beforeunload save completed milliseconds before tab close)
+    const mirrorIsStrictlyNewer =
+      lsMirror.revision !== null &&
+      !lsMirror.isSeed &&
+      lsMirror.revision > idbSnapshot.revision;
+
+    if (mirrorIsStrictlyNewer && lsMirror.revision !== null) {
+      const committed = await writeMainDatabaseSnapshotToIndexedDB(
+        lsMirror.db,
+        lsMirror.revision,
+        { isSeed: false, allowSameRevision: true }
+      );
+      return {
+        db: committed.db,
+        revision: committed.revision,
+        uiState,
+        isFirstLaunch: false,
+      };
     }
-    return { db: idbDb, uiState, isFirstLaunch: false };
+
+    // IndexedDB is primary source of truth — refresh localStorage mirror so stale data cannot linger
+    saveDatabase(idbSnapshot.db, idbSnapshot.revision, idbSnapshot.isSeed);
+    return {
+      db: idbSnapshot.db,
+      revision: idbSnapshot.revision,
+      uiState,
+      isFirstLaunch: false,
+    };
   }
 
   // Case 2: Saved data exists in IndexedDB (primary archive)
-  if (idbDb) {
-    return { db: idbDb, uiState, isFirstLaunch: false };
+  if (idbSnapshot) {
+    saveDatabase(idbSnapshot.db, idbSnapshot.revision, idbSnapshot.isSeed);
+    return {
+      db: idbSnapshot.db,
+      revision: idbSnapshot.revision,
+      uiState,
+      isFirstLaunch: false,
+    };
   }
 
-  // Case 3: Existing user migrating from earlier localStorage-only version
-  if (legacyLsDb) {
-    await writeMainDatabaseToIndexedDB(legacyLsDb);
-    return { db: legacyLsDb, uiState, isFirstLaunch: false };
+  // Case 3: Existing user migrating from earlier localStorage-only version or recovering after IDB wipe
+  if (lsMirror) {
+    const targetRev = lsMirror.revision !== null ? Math.max(1, lsMirror.revision) : 1;
+    const committed = await writeMainDatabaseSnapshotToIndexedDB(
+      lsMirror.db,
+      targetRev,
+      { isSeed: lsMirror.isSeed, allowSameRevision: true }
+    );
+    saveDatabase(committed.db, committed.revision, committed.isSeed);
+    return {
+      db: committed.db,
+      revision: committed.revision,
+      uiState,
+      isFirstLaunch: false,
+    };
   }
 
-  // Case 4: Very first launch ever (no saved data anywhere) — initialize once with demo data
+  // Case 4: Very first launch ever (zero saved data anywhere) — initialize once with default data
   const seed = createSeedDatabase();
-  await writeMainDatabaseToIndexedDB(seed);
-  saveDatabase(seed);
+  const committed = await writeMainDatabaseSnapshotToIndexedDB(seed, 0, {
+    isSeed: true,
+    allowSameRevision: true,
+  });
+  saveDatabase(committed.db, committed.revision, true);
   saveUiStateToLocalStorage(uiState);
-  return { db: seed, uiState, isFirstLaunch: true };
+  return {
+    db: committed.db,
+    revision: committed.revision,
+    uiState,
+    isFirstLaunch: true,
+  };
 }
 
 /**
  * Persists the full database immediately to IndexedDB (primary archive)
- * and updates the synchronous localStorage mirror as a fast crash fallback.
+ * with monotonic revision protection, and updates the synchronous localStorage mirror.
  */
-export function persistDatabaseImmediately(db: AppDatabase): Promise<void> {
-  saveDatabase(db);
-  return writeMainDatabaseToIndexedDB(db);
+export function persistDatabaseImmediately(
+  db: AppDatabase,
+  revision: number
+): Promise<MainDatabaseSnapshot> {
+  saveDatabase(db, revision, false);
+  return writeMainDatabaseSnapshotToIndexedDB(db, revision, { isSeed: false });
+}
+
+/**
+ * Reads the latest committed snapshot from IndexedDB (used for cross-tab sync).
+ */
+export async function readLatestCommittedDatabase(): Promise<{
+  db: AppDatabase;
+  revision: number;
+} | null> {
+  const snapshot = validateSnapshot(
+    await readMainDatabaseSnapshotFromIndexedDB().catch(() => null)
+  );
+  if (!snapshot) return null;
+  return { db: snapshot.db, revision: snapshot.revision };
 }
 
 function pad2(n: number): string {

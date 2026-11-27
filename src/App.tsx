@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowRightLeft,
+  Check,
   CheckCircle2,
   FileSpreadsheet,
   FolderOpen,
@@ -48,7 +49,11 @@ import {
 } from './utils/calculations';
 import { saveBackupToDisk } from './utils/diskBackup';
 import { exportClassToExcel } from './utils/excelExport';
-import { PersistedUiState, saveUiStateToLocalStorage } from './utils/storage';
+import {
+  PersistedUiState,
+  readUiStateFromLocalStorage,
+  saveUiStateToLocalStorage,
+} from './utils/storage';
 
 interface ConfirmState {
   title: string;
@@ -68,12 +73,21 @@ interface ToastNotification {
 const APP_ICON_URL = `${import.meta.env.BASE_URL}testmark-icon-192-v4.png`;
 
 export default function App() {
-  const [view, setView] = useState<AppView>('registro');
+  const initialUiRef = useRef<PersistedUiState | null>(null);
+  if (initialUiRef.current === null) {
+    initialUiRef.current = readUiStateFromLocalStorage();
+  }
+
+  const [view, setView] = useState<AppView>(initialUiRef.current.view);
 
   // Register filters
-  const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<ActivityCategory | 'ALL'>('ALL');
-  const [requirementFilter, setRequirementFilter] = useState<'ALL' | 'OK' | 'CARENZA'>('ALL');
+  const [searchQuery, setSearchQuery] = useState(initialUiRef.current.searchQuery);
+  const [categoryFilter, setCategoryFilter] = useState<ActivityCategory | 'ALL'>(
+    initialUiRef.current.categoryFilter
+  );
+  const [requirementFilter, setRequirementFilter] = useState<
+    'ALL' | 'OK' | 'CARENZA'
+  >(initialUiRef.current.requirementFilter);
 
   const uiStateRef = useRef<PersistedUiState>({
     view,
@@ -110,13 +124,6 @@ export default function App() {
     []
   );
 
-  const handleHydratedUiState = useCallback((hydrated: PersistedUiState) => {
-    setView(hydrated.view);
-    setSearchQuery(hydrated.searchQuery);
-    setCategoryFilter(hydrated.categoryFilter);
-    setRequirementFilter(hydrated.requirementFilter);
-  }, []);
-
   const handlePersistError = useCallback(
     (message: string) => {
       showToast(message, { variant: 'error' });
@@ -130,6 +137,10 @@ export default function App() {
     hasEmergencyFallback,
     retryLoad,
     recoverFromLocalFallback,
+    saveStatus,
+    lastSavedAt,
+    saveError,
+    retrySave,
     db,
     canUndo,
     canRedo,
@@ -141,11 +152,10 @@ export default function App() {
     redo,
   } = useUndoableDatabase({
     getUiState: () => uiStateRef.current,
-    onHydratedUiState: handleHydratedUiState,
     onPersistError: handlePersistError,
   });
 
-  // Persist view & filters in localStorage after initial hydration so the app reopens exactly where left off
+  // Persist view & filters in localStorage immediately when changed
   useEffect(() => {
     if (dbStatus !== 'ready') return;
     saveUiStateToLocalStorage({
@@ -155,6 +165,19 @@ export default function App() {
       requirementFilter,
     });
   }, [dbStatus, view, searchQuery, categoryFilter, requirementFilter]);
+
+  const formattedLastSavedTime = useMemo(() => {
+    if (!lastSavedAt) return '';
+    try {
+      return new Date(lastSavedAt).toLocaleTimeString('it-IT', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  }, [lastSavedAt]);
 
   // Modals state
   const [activityModalOpen, setActivityModalOpen] = useState(false);
@@ -903,8 +926,44 @@ export default function App() {
             </button>
           </nav>
 
-          {/* Zone 3: Discrete PWA Install + [UNDO] [REDO] [FLOPPY BACKUP] + 1 Contextual Primary Action */}
+          {/* Zone 3: Save Indicator + Discrete PWA Install + [UNDO] [REDO] [FLOPPY BACKUP] + 1 Contextual Primary Action */}
           <div className="flex items-center gap-1.5 shrink-0 sm:gap-2">
+            {saveStatus === 'error' ? (
+              <button
+                type="button"
+                onClick={retrySave}
+                title={`Errore salvataggio: ${saveError || 'sconosciuto'}. Clicca per riprovare.`}
+                aria-label="Errore salvataggio locale, clicca per riprovare"
+                className="inline-flex h-7 items-center gap-1 rounded px-1.5 text-[11px] font-semibold text-rose-700 transition-colors hover:bg-rose-50 whitespace-nowrap"
+              >
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden md:inline">Errore salvataggio</span>
+              </button>
+            ) : saveStatus === 'saving' ? (
+              <span
+                role="status"
+                aria-live="polite"
+                title="Salvataggio automatico sul dispositivo in corso..."
+                className="inline-flex h-7 items-center gap-1 px-1 text-[11px] font-medium text-blue-700 whitespace-nowrap"
+              >
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                <span className="hidden xl:inline">Salvataggio...</span>
+              </span>
+            ) : (
+              <span
+                role="status"
+                aria-live="polite"
+                title={
+                  formattedLastSavedTime
+                    ? `Salvato sul dispositivo alle ${formattedLastSavedTime}`
+                    : 'Tutti i dati salvati sul dispositivo'
+                }
+                className="inline-flex h-7 items-center gap-1 px-1 text-[11px] font-medium text-emerald-700 whitespace-nowrap"
+              >
+                <Check className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden xl:inline">Salvato</span>
+              </span>
+            )}
             <PWAInstallButton />
             <div
               className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50/70 p-0.5"

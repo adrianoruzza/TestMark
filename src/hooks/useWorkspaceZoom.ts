@@ -5,6 +5,35 @@ export const MAX_WORKSPACE_ZOOM = 2.0;
 export const DEFAULT_WORKSPACE_ZOOM = 1.0;
 export const ZOOM_STEP = 0.1;
 
+const WORKSPACE_ZOOM_STORAGE_KEY = 'testmark_workspace_zoom_v1';
+
+function readSavedZoomScale(): number {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return DEFAULT_WORKSPACE_ZOOM;
+    }
+    const raw = window.localStorage.getItem(WORKSPACE_ZOOM_STORAGE_KEY);
+    if (!raw) return DEFAULT_WORKSPACE_ZOOM;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return DEFAULT_WORKSPACE_ZOOM;
+    const clamped = Math.min(MAX_WORKSPACE_ZOOM, Math.max(MIN_WORKSPACE_ZOOM, parsed));
+    return Math.abs(clamped - DEFAULT_WORKSPACE_ZOOM) < 0.0005
+      ? DEFAULT_WORKSPACE_ZOOM
+      : clamped;
+  } catch {
+    return DEFAULT_WORKSPACE_ZOOM;
+  }
+}
+
+function saveZoomScale(scale: number): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem(WORKSPACE_ZOOM_STORAGE_KEY, String(scale));
+  } catch {
+    // Ignore localStorage quota errors
+  }
+}
+
 interface FocalPoint {
   x: number;
   y: number;
@@ -55,12 +84,16 @@ export function useWorkspaceZoom(
   options?: UseWorkspaceZoomOptions
 ) {
   const enabled = options?.enabled ?? true;
-  const [zoomPercent, setZoomPercent] = useState<number>(100);
-  const [isDefaultZoom, setIsDefaultZoom] = useState<boolean>(true);
+  const initialScale = readSavedZoomScale();
+  const initialPercent = Math.round(initialScale * 100);
+  const initialDefault = Math.abs(initialScale - DEFAULT_WORKSPACE_ZOOM) < 0.0005;
 
-  const scaleRef = useRef<number>(DEFAULT_WORKSPACE_ZOOM);
-  const lastReportedPercentRef = useRef<number>(100);
-  const lastReportedDefaultRef = useRef<boolean>(true);
+  const [zoomPercent, setZoomPercent] = useState<number>(initialPercent);
+  const [isDefaultZoom, setIsDefaultZoom] = useState<boolean>(initialDefault);
+
+  const scaleRef = useRef<number>(initialScale);
+  const lastReportedPercentRef = useRef<number>(initialPercent);
+  const lastReportedDefaultRef = useRef<boolean>(initialDefault);
 
   const onGestureStartRef = useRef(options?.onGestureStart);
   onGestureStartRef.current = options?.onGestureStart;
@@ -103,6 +136,7 @@ export function useWorkspaceZoom(
     if (rounded !== lastReportedPercentRef.current) {
       lastReportedPercentRef.current = rounded;
       setZoomPercent(rounded);
+      saveZoomScale(atDefault ? DEFAULT_WORKSPACE_ZOOM : scale);
     }
     if (atDefault !== lastReportedDefaultRef.current) {
       lastReportedDefaultRef.current = atDefault;

@@ -1,7 +1,7 @@
 import { AppDatabase } from '../types';
 
 export function createSeedDatabase(): AppDatabase {
-  const now = '2026-11-20T09:00:00.000Z';
+  const now = new Date().toISOString();
 
   return {
     version: 1,

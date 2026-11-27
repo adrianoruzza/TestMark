@@ -65,7 +65,7 @@ export default defineConfig(({command, isPreview}) => {
           ],
         },
         workbox: {
-          cacheId: 'testmark-v5',
+          cacheId: 'testmark-v6',
           cleanupOutdatedCaches: true,
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,woff,woff2}'],

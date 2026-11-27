@@ -6,6 +6,7 @@ const STORE_APP_DATA = 'app_data';
 const STORE_BACKUP_HANDLES = 'backup_handles';
 
 const KEY_MAIN_DATABASE = 'main_database';
+const KEY_PREVIOUS_DATABASE = 'main_database_previous';
 const KEY_BACKUP_DIRECTORY = 'backup_directory';
 
 interface FileSystemPermissionDescriptorLike {
@@ -38,10 +39,19 @@ export interface FileSystemDirectoryHandleLike {
   ) => Promise<'granted' | 'denied' | 'prompt'>;
 }
 
-interface MainDatabaseRecord {
-  id: typeof KEY_MAIN_DATABASE;
+export interface MainDatabaseSnapshot {
   db: AppDatabase;
+  revision: number;
   savedAt: string;
+  isSeed: boolean;
+}
+
+interface MainDatabaseRecord {
+  id: typeof KEY_MAIN_DATABASE | typeof KEY_PREVIOUS_DATABASE;
+  db: AppDatabase;
+  revision?: number;
+  savedAt?: string;
+  isSeed?: boolean;
 }
 
 interface BackupDirectoryRecord {
@@ -52,6 +62,35 @@ interface BackupDirectoryRecord {
 }
 
 let cachedDbPromise: Promise<IDBDatabase> | null = null;
+
+function resetCachedConnection(): void {
+  const existing = cachedDbPromise;
+  cachedDbPromise = null;
+  if (existing) {
+    void existing
+      .then((db) => {
+        try {
+          db.close();
+        } catch {
+          // Ignore close errors on already-closed connections
+        }
+      })
+      .catch(() => {});
+  }
+}
+
+function isRetriableConnectionError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const name = 'name' in err ? String((err as { name: unknown }).name) : '';
+  const message =
+    'message' in err ? String((err as { message: unknown }).message) : '';
+  return (
+    name === 'InvalidStateError' ||
+    name === 'TransactionInactiveError' ||
+    name === 'AbortError' ||
+    /closing|closed|connection/i.test(message)
+  );
+}
 
 function openIndexedDB(): Promise<IDBDatabase> {
   if (typeof indexedDB === 'undefined') {
@@ -121,8 +160,32 @@ function openIndexedDB(): Promise<IDBDatabase> {
   return cachedDbPromise;
 }
 
+async function withReconnectRetry<T>(
+  operation: (db: IDBDatabase) => Promise<T>,
+  maxRetries = 2
+): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      const db = await openIndexedDB();
+      return await operation(db);
+    } catch (err) {
+      if (attempt < maxRetries && isRetriableConnectionError(err)) {
+        attempt += 1;
+        resetCachedConnection();
+        await new Promise((resolve) => setTimeout(resolve, 40 * attempt));
+        continue;
+      }
+      if (isRetriableConnectionError(err)) {
+        resetCachedConnection();
+      }
+      throw err;
+    }
+  }
+}
+
 function getRecord<T>(storeName: string, key: string): Promise<T | undefined> {
-  return openIndexedDB().then(
+  return withReconnectRetry(
     (db) =>
       new Promise<T | undefined>((resolve, reject) => {
         try {
@@ -132,14 +195,15 @@ function getRecord<T>(storeName: string, key: string): Promise<T | undefined> {
           req.onsuccess = () => resolve(req.result as T | undefined);
           req.onerror = () =>
             reject(
-              req.error ?? new Error(`Errore lettura IndexedDB (${storeName}/${key}).`)
+              req.error ??
+                new Error(`Errore lettura IndexedDB (${storeName}/${key}).`)
             );
           tx.onabort = () =>
             reject(
-              tx.error ?? new Error(`Transazione di lettura interrotta (${storeName}).`)
+              tx.error ??
+                new Error(`Transazione di lettura interrotta (${storeName}).`)
             );
         } catch (err) {
-          cachedDbPromise = null;
           reject(err);
         }
       })
@@ -147,7 +211,7 @@ function getRecord<T>(storeName: string, key: string): Promise<T | undefined> {
 }
 
 function putRecord<T>(storeName: string, value: T): Promise<void> {
-  return openIndexedDB().then(
+  return withReconnectRetry(
     (db) =>
       new Promise<void>((resolve, reject) => {
         try {
@@ -161,10 +225,10 @@ function putRecord<T>(storeName: string, value: T): Promise<void> {
             );
           tx.onabort = () =>
             reject(
-              tx.error ?? new Error(`Transazione di scrittura interrotta (${storeName}).`)
+              tx.error ??
+                new Error(`Transazione di scrittura interrotta (${storeName}).`)
             );
         } catch (err) {
-          cachedDbPromise = null;
           reject(err);
         }
       })
@@ -172,7 +236,7 @@ function putRecord<T>(storeName: string, value: T): Promise<void> {
 }
 
 function deleteRecord(storeName: string, key: string): Promise<void> {
-  return openIndexedDB().then(
+  return withReconnectRetry(
     (db) =>
       new Promise<void>((resolve, reject) => {
         try {
@@ -182,43 +246,154 @@ function deleteRecord(storeName: string, key: string): Promise<void> {
           tx.oncomplete = () => resolve();
           tx.onerror = () =>
             reject(
-              tx.error ?? new Error(`Errore rimozione IndexedDB (${storeName}/${key}).`)
+              tx.error ??
+                new Error(`Errore rimozione IndexedDB (${storeName}/${key}).`)
             );
           tx.onabort = () =>
             reject(
-              tx.error ?? new Error(`Transazione di rimozione interrotta (${storeName}).`)
+              tx.error ??
+                new Error(`Transazione di rimozione interrotta (${storeName}).`)
             );
         } catch (err) {
-          cachedDbPromise = null;
           reject(err);
         }
       })
   );
 }
 
+function toSnapshot(record: MainDatabaseRecord | undefined): MainDatabaseSnapshot | null {
+  if (!record || !record.db) return null;
+  return {
+    db: record.db,
+    // Legacy records written before revision tracking are preserved as revision 1 (never treated as seed)
+    revision:
+      typeof record.revision === 'number' && Number.isFinite(record.revision)
+        ? record.revision
+        : 1,
+    savedAt: record.savedAt || record.db.updatedAt || new Date().toISOString(),
+    isSeed: Boolean(record.isSeed),
+  };
+}
+
 // Serialize database writes so rapid user edits always commit in strict order
 let writeQueue: Promise<void> = Promise.resolve();
 
-export function readMainDatabaseFromIndexedDB(): Promise<AppDatabase | null> {
+export function readMainDatabaseSnapshotFromIndexedDB(): Promise<MainDatabaseSnapshot | null> {
   return getRecord<MainDatabaseRecord>(STORE_APP_DATA, KEY_MAIN_DATABASE).then(
-    (record) => record?.db ?? null
+    toSnapshot
   );
 }
 
-export function writeMainDatabaseToIndexedDB(db: AppDatabase): Promise<void> {
-  const record: MainDatabaseRecord = {
-    id: KEY_MAIN_DATABASE,
+export function readPreviousDatabaseSnapshotFromIndexedDB(): Promise<MainDatabaseSnapshot | null> {
+  return getRecord<MainDatabaseRecord>(STORE_APP_DATA, KEY_PREVIOUS_DATABASE).then(
+    toSnapshot
+  );
+}
+
+/**
+ * Atomically writes the main database snapshot to IndexedDB, archiving the
+ * previous valid snapshot under `main_database_previous` in the same transaction
+ * and preventing stale tabs from overwriting a strictly higher revision.
+ */
+export function writeMainDatabaseSnapshotToIndexedDB(
+  db: AppDatabase,
+  revision: number,
+  options?: { isSeed?: boolean; allowSameRevision?: boolean }
+): Promise<MainDatabaseSnapshot> {
+  const savedAt = db.updatedAt || new Date().toISOString();
+  const nextSnapshot: MainDatabaseSnapshot = {
     db,
-    savedAt: db.updatedAt || new Date().toISOString(),
+    revision,
+    savedAt,
+    isSeed: Boolean(options?.isSeed),
   };
+
+  const runWrite = () =>
+    withReconnectRetry<MainDatabaseSnapshot>(
+      (idb) =>
+        new Promise<MainDatabaseSnapshot>((resolve, reject) => {
+          try {
+            const tx = idb.transaction(STORE_APP_DATA, 'readwrite');
+            const store = tx.objectStore(STORE_APP_DATA);
+            const readReq = store.get(KEY_MAIN_DATABASE);
+            let committedSnapshot = nextSnapshot;
+
+            readReq.onsuccess = () => {
+              const existing = readReq.result as MainDatabaseRecord | undefined;
+              const existingRev =
+                existing &&
+                typeof existing.revision === 'number' &&
+                Number.isFinite(existing.revision)
+                  ? existing.revision
+                  : existing?.db
+                    ? 1
+                    : -1;
+
+              // Guard against a stale tab or premature seed write overwriting newer committed data
+              const isStaleWrite = options?.allowSameRevision
+                ? existingRev > revision
+                : existingRev >= revision && existingRev > 0;
+
+              if (isStaleWrite && existing?.db) {
+                committedSnapshot = toSnapshot(existing) ?? nextSnapshot;
+                return;
+              }
+
+              // Keep previous valid non-seed state as an atomic rollback safety copy inside IndexedDB
+              if (existing?.db && !existing.isSeed) {
+                const previousRecord: MainDatabaseRecord = {
+                  id: KEY_PREVIOUS_DATABASE,
+                  db: existing.db,
+                  revision: existingRev,
+                  savedAt: existing.savedAt || existing.db.updatedAt,
+                  isSeed: false,
+                };
+                store.put(previousRecord);
+              }
+
+              const nextRecord: MainDatabaseRecord = {
+                id: KEY_MAIN_DATABASE,
+                db,
+                revision,
+                savedAt,
+                isSeed: Boolean(options?.isSeed),
+              };
+              store.put(nextRecord);
+            };
+
+            readReq.onerror = () =>
+              reject(
+                readReq.error ??
+                  new Error('Errore durante la verifica pre-salvataggio in IndexedDB.')
+              );
+
+            tx.oncomplete = () => resolve(committedSnapshot);
+            tx.onerror = () =>
+              reject(
+                tx.error ??
+                  new Error('Errore durante il salvataggio in IndexedDB.')
+              );
+            tx.onabort = () =>
+              reject(
+                tx.error ??
+                  new Error('Transazione di salvataggio interrotta in IndexedDB.')
+              );
+          } catch (err) {
+            reject(err);
+          }
+        })
+    );
 
   const task = writeQueue
     .catch(() => {
       // Keep queue running even if a previous write failed
     })
-    .then(() => putRecord(STORE_APP_DATA, record));
+    .then(runWrite);
 
-  writeQueue = task;
+  writeQueue = task.then(
+    () => undefined,
+    () => undefined
+  );
   return task;
 }
 
