@@ -24,11 +24,11 @@ export default defineConfig(({command, isPreview}) => {
         manifestFilename: 'manifest.webmanifest',
         includeAssets: [
           'favicon.ico',
-          'testmark-favicon-32-v4.png',
-          'testmark-apple-touch-icon-v4.png',
-          'testmark-icon-192-v4.png',
-          'testmark-icon-512-v4.png',
-          'testmark-icon-maskable-512-v4.png',
+          'testmark-favicon-32-v3.png',
+          'testmark-apple-touch-icon-v3.png',
+          'testmark-icon-192-v3.png',
+          'testmark-icon-512-v3.png',
+          'testmark-icon-maskable-512-v3.png',
         ],
         manifest: {
           id: base,
@@ -45,19 +45,19 @@ export default defineConfig(({command, isPreview}) => {
           background_color: '#f8fafc',
           icons: [
             {
-              src: 'testmark-icon-192-v4.png',
+              src: 'testmark-icon-192-v3.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: 'testmark-icon-512-v4.png',
+              src: 'testmark-icon-512-v3.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: 'testmark-icon-maskable-512-v4.png',
+              src: 'testmark-icon-maskable-512-v3.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',

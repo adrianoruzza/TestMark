@@ -70,7 +70,7 @@ interface ToastNotification {
   onAction?: () => void;
 }
 
-const APP_ICON_URL = `${import.meta.env.BASE_URL}testmark-icon-192-v4.png`;
+const APP_ICON_URL = `${import.meta.env.BASE_URL}testmark-icon-192-v3.png?v=4`;
 
 export default function App() {
   const initialUiRef = useRef<PersistedUiState | null>(null);
